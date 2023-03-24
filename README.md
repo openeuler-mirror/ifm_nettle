@@ -1,10 +1,27 @@
-# ifm_nettle
-
 #### 介绍
-This is an interface mediation for nettle.
+该软件为nettle的接口适配层，支持将部分加解密算法调用鲲鹏硬件提供的加速能力，从而在鲲鹏场景下提供更高的加解密效率。
+
+鲲鹏硬件加速库介绍请点击[链接](https://www.hikunpeng.com/document/detail/zh/kunpengaccel/encryp-decryp/api-kae/kunpengaccel_17_0004.html)
+
+nettle官方网站：http://www.lysator.liu.se/~nisse/nettle/
 
 #### 软件架构
-软件架构说明
+接口上保持同nettle兼容，支持通过配置将部分加解密算法的实现调用鲲鹏加速库提供的接口，硬件未实现的接口，继续调用原有软件的接口进行实现。
+整体逻辑架构如下:
+
+                    +----------------+
+                    |                |
+                    |   inf_nettle   |
+                    |                |
+                    +----------------+
+                           /\
+                          /  \
+                         /    \
+        +----------------+    +----------------+
+        |                |    |                |
+        |     nettle     |    |    KAE WD接口  |
+        |                |    |                |
+        +----------------+    +----------------+
 
 
 #### 安装教程
@@ -19,19 +36,6 @@ This is an interface mediation for nettle.
 2.  xxxx
 3.  xxxx
 
-#### 参与贡献
+#### 仓库Committer
+ @huangduirong huangduirong@huawei.com
 
-1.  Fork 本仓库
-2.  新建 Feat_xxx 分支
-3.  提交代码
-4.  新建 Pull Request
-
-
-#### 特技
-
-1.  使用 Readme\_XXX.md 来支持不同的语言，例如 Readme\_en.md, Readme\_zh.md
-2.  Gitee 官方博客 [blog.gitee.com](https://blog.gitee.com)
-3.  你可以 [https://gitee.com/explore](https://gitee.com/explore) 这个地址来了解 Gitee 上的优秀开源项目
-4.  [GVP](https://gitee.com/gvp) 全称是 Gitee 最有价值开源项目，是综合评定出的优秀开源项目
-5.  Gitee 官方提供的使用手册 [https://gitee.com/help](https://gitee.com/help)
-6.  Gitee 封面人物是一档用来展示 Gitee 会员风采的栏目 [https://gitee.com/gitee-stars/](https://gitee.com/gitee-stars/)
