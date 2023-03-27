@@ -1,0 +1,1 @@
+#cmakedefine VERSION "@IFM_NETTLE_VERSION@"
