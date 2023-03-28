@@ -26,9 +26,29 @@ nettle官方网站：http://www.lysator.liu.se/~nisse/nettle/
 
 #### 安装教程
 
-1.  xxxx
-2.  xxxx
-3.  xxxx
+1.  执行如下命令安装gmock-devel cmake make
+```
+yum install -y gmock-devel cmake make
+```
+2.  使用如下命令clone代码
+```
+git clone https://gitee.com/openeuler/ifm_nettle.git
+```
+3.  进入ifm_nettle目录，执行如下命令进行编译
+```
+sudo mkdir build
+cd build
+cmake ..
+make
+```
+4. 执行如下命令运行测试用例：
+```
+ctest
+```
+5. 执行如下命令安装：
+```
+make install
+```
 
 #### 使用说明
 
