@@ -23,10 +23,24 @@
 #include <gtest/gtest.h>
 
 #include "sm3.h"
+#include "testutils.h"
+
+const struct nettle_hash nettle_ifm_sm3
+= _NETTLE_HASH(sm3, SM3);
 
 TEST(sm3_testcases, test_sm3_init_use_nettle)
 {
-    sm3_init(NULL);
+    /* test vectors from:
+     * https://datatracker.ietf.org/doc/html/draft-shen-sm3-hash-01
+     */
+  test_hash(&nettle_ifm_sm3,
+            SDATA("abc"),
+            SHEX("66c7f0f462eeedd9 d1f2d46bdc10e4e2"
+                 "4167c4875cf2f7a2 297da02b8f4ba8e0"));
 
-    EXPECT_EQ(1, 1);
+  test_hash(&nettle_ifm_sm3,
+            SDATA("abcdabcdabcdabcdabcdabcdabcdabcd"
+                  "abcdabcdabcdabcdabcdabcdabcdabcd"),
+            SHEX("debe9ff92275b8a1 38604889c18e5a4d"
+                 "6fdb70e5387e5765 293dcba39c0c5732"));
 }

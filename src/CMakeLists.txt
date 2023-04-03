@@ -53,6 +53,7 @@ target_include_directories(libifm_nettle
 
 # set libifm_nettle compile flags
 set_target_properties(libifm_nettle PROPERTIES PREFIX "")
+target_link_libraries(libifm_nettle ${check_libs} nettle)
 
 if (CMAKE_TOOLCHAIN_FILE)
     target_link_directories(libifm_nettle PUBLIC ${CMAKE_LIBRARY_PATH})
