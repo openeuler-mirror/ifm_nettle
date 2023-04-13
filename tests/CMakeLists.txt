@@ -61,6 +61,7 @@ endif()
 #   api testcase
 _DEFINE_NEW_TEST(sm3_ut sm3_testcase)
 _DEFINE_NEW_TEST(md5_ut md5_testcase)
+_DEFINE_NEW_TEST(sha256_ut sha256_testcase)
 
 # mock test for run lcov to generate html
 add_executable(mock_ut main.cpp)
@@ -73,7 +74,7 @@ target_link_libraries(mock_ut
     pthread
     libifm_nettle
     )
-add_dependencies(mock_ut sm3_ut md5_ut)
+add_dependencies(mock_ut sm3_ut md5_ut sha256_ut)
 
 IF(ENABLE_GCOV)
     add_custom_target(coverage
