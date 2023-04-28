@@ -28,7 +28,7 @@ nettle官方网站：http://www.lysator.liu.se/~nisse/nettle/
 
 1.  执行如下命令安装gmock-devel cmake make
 ```
-yum install -y gmock-devel cmake make gcc-c++
+yum install -y gmock-devel cmake make gcc-c++ nettle-devel libgcrypt-devel
 ```
 2.  使用如下命令clone代码
 ```
