@@ -35,12 +35,16 @@ macro(_DEFINE_NEW_TEST)
         ${GTEST_LIBRARY}
         pthread
         libifm_nettle
+        libifm_libgcrypt
+        gpg-error
         )
 
     target_include_directories(${ARGV0} PUBLIC
         ${GTEST_INCLUDE_DIR}
         PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}
+        PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/gcrypt
         PUBLIC ${CMAKE_SOURCE_DIR}/src
+        PUBLIC ${CMAKE_SOURCE_DIR}/src/gcrypt
         )
 
     add_test(
@@ -62,6 +66,7 @@ endif()
 _DEFINE_NEW_TEST(sm3_ut sm3_testcase)
 _DEFINE_NEW_TEST(md5_ut md5_testcase)
 _DEFINE_NEW_TEST(sha256_ut sha256_testcase)
+_DEFINE_NEW_TEST(gcrypt_md_ut gcrypt_md_testcases)
 
 # mock test for run lcov to generate html
 add_executable(mock_ut main.cpp)
@@ -72,9 +77,8 @@ target_include_directories(mock_ut PUBLIC
 target_link_libraries(mock_ut
     ${GTEST_LIBRARY}
     pthread
-    libifm_nettle
     )
-add_dependencies(mock_ut sm3_ut md5_ut sha256_ut)
+add_dependencies(mock_ut sm3_ut md5_ut sha256_ut gcrypt_md_ut)
 
 IF(ENABLE_GCOV)
     add_custom_target(coverage
