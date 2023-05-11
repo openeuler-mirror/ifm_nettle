@@ -23,7 +23,10 @@
 #include <gtest/gtest.h>
 
 #include "md5.h"
+#define md5_ctx ifm_md5_ctx
+
 #include "testutils.h"
+
 
 const struct nettle_hash nettle_ifm_md5
 = _NETTLE_HASH(md5, MD5);

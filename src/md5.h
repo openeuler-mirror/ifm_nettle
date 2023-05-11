@@ -3,6 +3,13 @@
 
 #include <stddef.h>
 #include <stdint.h>
+#include "md5_meta.h"
+#ifdef __aarch64__
+#include "uadk/v1/wd.h"
+#include "uadk/v1/wd_bmm.h"
+#include "uadk/v1/wd_digest.h"
+#endif
+
 
 #ifdef __cplusplus
 extern "C" {
@@ -11,23 +18,6 @@ extern "C" {
 #define md5_init ifm_md5_init
 #define md5_update ifm_md5_update
 #define md5_digest ifm_md5_digest
-#define md5_ctx ifm_md5_ctx
-
-#define MD5_DIGEST_SIZE 16
-#define MD5_BLOCK_SIZE 64
-/* For backwards compatibility */
-#define MD5_DATA_SIZE MD5_BLOCK_SIZE
-
-/* Digest is kept internally as 4 32-bit words. */
-#define _MD5_DIGEST_LENGTH 4
-
-struct ifm_md5_ctx
-{
-  uint32_t state[_MD5_DIGEST_LENGTH];
-  uint64_t count;               /* Block count */
-  unsigned index;               /* Into buffer */
-  uint8_t block[MD5_BLOCK_SIZE]; /* Block buffer */
-};
 
 void
 ifm_md5_init(struct ifm_md5_ctx *ctx);
