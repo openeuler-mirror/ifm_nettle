@@ -26,6 +26,7 @@ set(check_incs
 
 set(check_nettle_libs
     ${LIBNETTLE_LIBRARY}
+    ${LIBWD_LIBRARY}
     )
 
 set(check_libgcrypt_libs
