@@ -70,7 +70,7 @@ if (ENABLE_UT)
     find_path(GMOCK_INCLUDE_DIR gmock/gmock.h
         HINTS ${PC_GMOCK_INCLUDEDIR} ${PC_GMOCK_INCLUDE_DIRS})
     _CHECK(GMOCK_INCLUDE_DIR "GMOCK_INCLUDE_DIR-NOTFOUND" "gmock.h")
-    find_library(GMOCK_LIBRARY z
+    find_library(GMOCK_LIBRARY gmock
         HINTS ${PC_GMOCK_LIBDIR} ${PC_GMOCK_LIBRARY_DIRS})
     _CHECK(GMOCK_LIBRARY "GMOCK_LIBRARY-NOTFOUND" "libgmock.so")
 endif()
