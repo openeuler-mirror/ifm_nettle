@@ -3,43 +3,76 @@
 
 #include <stddef.h>
 #include <stdint.h>
-
+#include "sha2_meta.h"
 #ifdef __cplusplus
 extern "C" {
 #endif
-
+#define sha224_init ifm_sha224_init
+#define sha224_digest ifm_sha224_digest
 #define sha256_init ifm_sha256_init
 #define sha256_update ifm_sha256_update
 #define sha256_digest ifm_sha256_digest
-#define sha256_ctx ifm_sha256_ctx
-
-/* SHA256 */
-#define SHA256_DIGEST_SIZE 32
-#define SHA256_BLOCK_SIZE 64
-
-/* Digest is kept internally as 8 32-bit words. */
-#define _SHA256_DIGEST_LENGTH 8
-
-struct ifm_sha256_ctx
-{
-  uint32_t state[_SHA256_DIGEST_LENGTH];    /* State variables */
-  uint64_t count;                           /* 64-bit block count */
-  unsigned int index;                       /* index into buffer */
-  uint8_t block[SHA256_BLOCK_SIZE];          /* SHA256 data buffer */
-};
+#define sha384_init ifm_sha384_init
+#define sha384_digest ifm_sha384_digest
+#define sha512_init ifm_sha512_init
+#define sha512_update ifm_sha512_update
+#define sha512_digest ifm_sha512_digest
+#define sha512_224_init   ifm_sha512_224_init
+#define sha512_224_digest ifm_sha512_224_digest
+#define sha512_256_init   ifm_sha512_256_init
+#define sha512_256_digest ifm_sha512_256_digest
 
 void
 ifm_sha256_init(struct ifm_sha256_ctx *ctx);
 
 void
-ifm_sha256_update(struct ifm_sha256_ctx *ctx,
-	      size_t length,
-	      const uint8_t *data);
+ifm_sha256_update(struct ifm_sha256_ctx *ctx, size_t length, const uint8_t *data);
 
 void
-ifm_sha256_digest(struct ifm_sha256_ctx *ctx,
-	      size_t length,
-	      uint8_t *digest);
+ifm_sha256_digest(struct ifm_sha256_ctx *ctx, size_t length, uint8_t *digest);
+
+void
+ifm_sha224_init(struct ifm_sha224_ctx *ctx);
+
+#define ifm_sha224_update ifm_sha256_update
+
+void
+ifm_sha224_digest(struct ifm_sha224_ctx *ctx, size_t length, uint8_t *digest);
+
+
+
+void
+ifm_sha512_init(struct ifm_sha512_ctx *ctx);
+
+void
+ifm_sha512_update(struct ifm_sha512_ctx *ctx, size_t length, const uint8_t *data);
+
+void
+ifm_sha512_digest(struct ifm_sha512_ctx *ctx, size_t length, uint8_t *digest);
+
+void
+ifm_sha384_init(struct ifm_sha384_ctx *ctx);
+
+#define ifm_sha384_update ifm_sha512_update
+
+void
+ifm_sha384_digest(struct ifm_sha384_ctx *ctx, size_t length, uint8_t *digest);
+
+void
+ifm_sha512_224_init(struct ifm_sha512_224_ctx *ctx);
+
+#define ifm_sha512_224_update ifm_sha512_update
+
+void
+ifm_sha512_224_digest(struct ifm_sha512_224_ctx *ctx, size_t length, uint8_t *digest);
+
+void
+ifm_sha512_256_init(struct ifm_sha512_256_ctx *ctx);
+
+#define ifm_sha512_256_update ifm_sha512_update
+
+void
+ifm_sha512_256_digest(struct ifm_sha512_256_ctx *ctx, size_t length, uint8_t *digest);
 
 #ifdef __cplusplus
 }
