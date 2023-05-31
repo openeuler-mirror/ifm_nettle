@@ -19,4 +19,11 @@ if (ENABLE_LIBIFM_LIBGCRYPT STREQUAL "ON")
     message("${Green}--  Enable libifm_libgcrypt${ColourReset}")
 endif()
 
+option(ENABLE_LIBIFM_LIBXCRYPT "enable ifm_libxcrypt libifm_libxcrypt option" ON)
+if (ENABLE_LIBIFM_LIBXCRYPT STREQUAL "ON")
+    add_definitions(-DENABLE_LIBIFM_LIBXCRYPT=1)
+    set(ENABLE_LIBIFM_LIBXCRYPT 1)
+    message("${Green}--  Enable libifm_libxcrypt${ColourReset}")
+endif()
+
 message("${BoldGreen}---- Selected options end ----${ColourReset}")

@@ -75,6 +75,8 @@ configure_file(
 	"${CMAKE_BINARY_DIR}/conf/ifm_nettle.pc"
 	"${CMAKE_CURRENT_SOURCE_DIR}/ifm_libgcrypt.pc.in"
 	"${CMAKE_BINARY_DIR}/conf/ifm_libgcrypt.pc"
+	"${CMAKE_CURRENT_SOURCE_DIR}/ifm_libxcrypt.pc.in"
+	"${CMAKE_BINARY_DIR}/conf/ifm_libxcrypt.pc"
 )
 
 add_subdirectory(${CMAKE_CURRENT_SOURCE_DIR}/src)
@@ -115,6 +117,10 @@ install(FILES ${CMAKE_BINARY_DIR}/conf/ifm_nettle.pc
 
 # install all files
 install(FILES ${CMAKE_BINARY_DIR}/conf/ifm_libgcrypt.pc
+	DESTINATION ${LIB_INSTALL_DIR_DEFAULT}/pkgconfig PERMISSIONS OWNER_READ OWNER_WRITE GROUP_READ GROUP_WRITE WORLD_READ WORLD_EXECUTE)
+
+# install all files
+install(FILES ${CMAKE_BINARY_DIR}/conf/ifm_libxcrypt.pc
 	DESTINATION ${LIB_INSTALL_DIR_DEFAULT}/pkgconfig PERMISSIONS OWNER_READ OWNER_WRITE GROUP_READ GROUP_WRITE WORLD_READ WORLD_EXECUTE)
 
 # uninstall
