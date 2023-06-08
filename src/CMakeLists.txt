@@ -33,6 +33,10 @@ set(check_libgcrypt_libs
     ${LIBGCRYPT_LIBRARY}
     )
 
+set(check_libxcrypt_libs
+    ${LIBXCRYPT_LIBRARY}
+    )
+
 list(REMOVE_DUPLICATES check_incs)
 list(REMOVE_DUPLICATES check_nettle_libs)
 
@@ -121,5 +125,48 @@ if (ENABLE_LIBIFM_LIBGCRYPT)
     install(TARGETS libifm_libgcrypt
         LIBRARY DESTINATION ${LIB_INSTALL_DIR_DEFAULT} PERMISSIONS OWNER_READ OWNER_EXECUTE GROUP_READ GROUP_EXECUTE WORLD_READ WORLD_EXECUTE)
     install(TARGETS libifm_libgcrypt_s
+        ARCHIVE DESTINATION ${LIB_INSTALL_DIR_DEFAULT} PERMISSIONS OWNER_READ OWNER_EXECUTE GROUP_READ GROUP_EXECUTE WORLD_READ WORLD_EXECUTE)
+endif()
+
+aux_source_directory(${CMAKE_CURRENT_SOURCE_DIR}/xcrypt xcrypt_srcs)
+list(REMOVE_ITEM xcrypt_srcs "${CMAKE_CURRENT_SOURCE_DIR}/xcrypt/utils.c")
+message("--  Get top srcs: " ${xcrypt_srcs})
+
+if (ENABLE_LIBIFM_LIBXCRYPT)
+    # set libifm_libxcrypt library
+    add_library(libifm_libxcrypt SHARED ${xcrypt_srcs})
+
+    set(libifm_libxcrypt_incs
+        ${CMAKE_CURRENT_SOURCE_DIR}/xcrypt
+        ${CMAKE_BINARY_DIR}/conf
+        ${check_incs}
+    )
+
+    # set libifm_libxcrypt include dirs
+    target_include_directories(libifm_libxcrypt
+        PUBLIC ${libifm_libxcrypt_incs}
+        )
+
+    # set libifm_libxcrypt compile flags
+    set_target_properties(libifm_libxcrypt PROPERTIES PREFIX "")
+    target_link_libraries(libifm_libxcrypt ${check_libxcrypt_libs} crypt)
+
+    if (CMAKE_TOOLCHAIN_FILE)
+        target_link_directories(libifm_libxcrypt PUBLIC ${CMAKE_LIBRARY_PATH})
+        target_link_libraries(libifm_libxcrypt ${EXTRAL_LINK_LIBS})
+    endif()
+
+
+    add_library(libifm_libxcrypt_s STATIC ${xcrypt_srcs})
+    target_include_directories(libifm_libxcrypt_s
+        PUBLIC ${libifm_libxcrypt_incs}
+        )
+    set_target_properties(libifm_libxcrypt_s PROPERTIES PREFIX "")
+    set_target_properties(libifm_libxcrypt_s PROPERTIES OUTPUT_NAME libifm_libxcrypt)
+
+    # install all files
+    install(TARGETS libifm_libxcrypt
+        LIBRARY DESTINATION ${LIB_INSTALL_DIR_DEFAULT} PERMISSIONS OWNER_READ OWNER_EXECUTE GROUP_READ GROUP_EXECUTE WORLD_READ WORLD_EXECUTE)
+    install(TARGETS libifm_libxcrypt_s
         ARCHIVE DESTINATION ${LIB_INSTALL_DIR_DEFAULT} PERMISSIONS OWNER_READ OWNER_EXECUTE GROUP_READ GROUP_EXECUTE WORLD_READ WORLD_EXECUTE)
 endif()

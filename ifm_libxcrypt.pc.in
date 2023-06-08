@@ -1,0 +1,12 @@
+prefix=@CMAKE_INSTALL_PREFIX@
+libdir=@CMAKE_INSTALL_PREFIX@/lib
+localstatedir=@CMAKE_INSTALL_PREFIX@/var
+includedir=@CMAKE_INSTALL_PREFIX@/include
+
+Name: libifm_libxcrypt
+Description: light-weighted container runtime library
+Version: @IFM_NETTLE_VERSION@
+URL: libifm_libxcrypt
+Libs: -L@CMAKE_INSTALL_PREFIX@/lib -lifm_libxcrypt
+Cflags: -I@CMAKE_INSTALL_PREFIX@/include
+
