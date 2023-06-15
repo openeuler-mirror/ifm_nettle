@@ -1,3 +1,24 @@
+/******************************************************************************
+ *
+ * Copyright (c) Huawei Technologies Co., Ltd. 2020. All rights reserved.
+ *
+ * Authors:
+ * huangduirong <huangduirong@huawei.com>
+ *
+ * This library is free software; you can redistribute it and/or
+ * modify it under the terms of the GNU Lesser General Public
+ * License as published by the Free Software Foundation; either
+ * version 2.1 of the License, or (at your option) any later version.
+ *
+ * This library is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU
+ * Lesser General Public License for more details.
+ *
+ * You should have received a copy of the GNU Lesser General Public
+ * License along with this library; if not, write to the Free Software
+ * Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA  02110-1301  USA
+ ********************************************************************************/
 #ifndef IFM_NETTLE_MD5_META_INCLUDED
 #define IFM_NETTLE_MD5_META_INCLUDED
 
@@ -24,15 +45,15 @@ extern "C" {
 
 #ifdef __aarch64__
 #define SQE_SIZE 128
-#define MAX_BLOCK_SZ	1024*1024*1		// 每次hash分段的最大长度
-#define MAX_BLOCK_NM	128
+#define MAX_BLOCK_SZ    1024*1024*1        // 每次hash分段的最大长度
+#define MAX_BLOCK_NM    128
 struct uadk_digest_st
 {
-	struct wd_queue *pq;
+    struct wd_queue *pq;
     struct wcrypto_digest_ctx_setup setup;
-	struct wcrypto_digest_op_data opdata;
-	void *pool;
-	void *ctx;
+    struct wcrypto_digest_op_data opdata;
+    void *pool;
+    void *ctx;
 };
 #endif
 
@@ -44,7 +65,7 @@ struct ifm_md5_ctx
     uint8_t block[MD5_BLOCK_SIZE]; /* Block buffer */
 #ifdef __aarch64__
     struct uadk_digest_st uadk_ctx; /* UADK相关的结构体数据 */
-	bool use_uadk;
+    bool use_uadk;
 #endif
 };
 
