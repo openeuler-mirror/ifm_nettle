@@ -21,7 +21,7 @@
  * Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA  02110-1301  USA
  ********************************************************************************/
 #include <gtest/gtest.h>
-
+#include <stddef.h>
 #include <gpg-error.h>
 #include "ifm_gcrypt.h"
 
@@ -160,7 +160,7 @@ hex2buffer (const char *string, size_t *r_length)
   length = 0;
   for (s=string; *s; s +=2 )
     {
-      if (!hexdigitp (s) || !hexdigitp (s+1))
+      if (!hexdigitp (s) || !hexdigitp (s + 1))
         return NULL;           /* Invalid hex digits. */
       ((unsigned char*)buffer)[length++] = xtoi_2 (s);
     }
