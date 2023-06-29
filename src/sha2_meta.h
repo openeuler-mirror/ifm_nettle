@@ -29,7 +29,6 @@ Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA
 #include <stddef.h>
 #include <stdint.h>
 
-
 #ifdef __cplusplus
 extern "C" {
 #endif
@@ -77,8 +76,6 @@ struct ifm_sha512_ctx
 #define SHA512_256_DIGEST_SIZE 32
 #define SHA512_256_BLOCK_SIZE SHA512_BLOCK_SIZE
 #define ifm_sha512_256_ctx ifm_sha512_ctx
-
-
 #ifdef __cplusplus
 }
 #endif

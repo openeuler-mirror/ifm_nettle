@@ -42,7 +42,7 @@ typedef void ifm_cipher_func(const void *ctx, size_t length, uint8_t *dst, const
 
 union ifm_block16 {
     uint8_t b[16];
-    unsigned long w[16 / sizeof(unsigned long)] _NETTLE_ATTRIBUTE_DEPRECATED;
+    unsigned long w[16 / sizeof(unsigned long)];
     uint64_t u64[2];
 };
 
