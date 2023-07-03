@@ -37,6 +37,7 @@ macro(_DEFINE_NEW_TEST)
         libifm_nettle
         libifm_libgcrypt
         gpg-error
+        gmp
         )
 
     target_include_directories(${ARGV0} PUBLIC
@@ -75,6 +76,7 @@ _DEFINE_NEW_TEST(gcrypt_md_ut gcrypt_md_testcases)
 _DEFINE_NEW_TEST(gcrypt_pk_ut gcrypt_pk_testcases)
 _DEFINE_NEW_TEST(aes_ut aes_testcases)
 _DEFINE_NEW_TEST(gcm_ut gcm_testcases)
+_DEFINE_NEW_TEST(rsa_ut rsa_testcases)
 
 
 
@@ -88,7 +90,7 @@ target_link_libraries(mock_ut
     ${GTEST_LIBRARY}
     pthread
     )
-add_dependencies(mock_ut sm3_ut md5_ut sha224_ut sha256_ut sha384_ut sha512_ut sha512_224_ut sha512_256_ut gcrypt_md_ut gcrypt_pk_ut aes_ut gcm_ut)
+add_dependencies(mock_ut sm3_ut md5_ut sha224_ut sha256_ut sha384_ut sha512_ut sha512_224_ut sha512_256_ut gcrypt_md_ut gcrypt_pk_ut aes_ut gcm_ut rsa_ut)
 
 IF(ENABLE_GCOV)
     add_custom_target(coverage
