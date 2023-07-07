@@ -35,6 +35,11 @@ extern "C" {
 /* Define the asymmetric encryption functions. */
 #define gcry_md_algo_info ifm_gcry_md_algo_info
 #define gcry_md_open ifm_gcry_md_open
+#define gcry_md_enable ifm_gcry_md_enable
+#define gcry_md_write ifm_gcry_md_write
+#define gcry_md_read ifm_gcry_md_read
+#define gcry_md_close ifm_gcry_md_close
+#define gcry_md_hash_buffer ifm_gcry_md_hash_buffer
 #define gcry_pk_verify ifm_gcry_pk_verify
 #define gcry_pk_sign ifm_gcry_pk_sign
 #define gcry_pk_encrypt ifm_gcry_pk_encrypt
@@ -60,6 +65,17 @@ gcry_error_t ifm_gcry_md_open(gcry_md_hd_t *h, int algo, unsigned int flags);
 
 /* Retrieve various information about the algorithm ALGO. */
 gcry_error_t ifm_gcry_md_algo_info(int algo, int what, void *buffer, size_t *nbytes);
+
+gcry_error_t ifm_gcry_md_enable(gcry_md_hd_t hd, int algo);
+
+void ifm_gcry_md_write(gcry_md_hd_t hd, const void *buffer, size_t length);
+
+unsigned char *ifm_gcry_md_read(gcry_md_hd_t hd, int algo);
+
+void ifm_gcry_md_close(gcry_md_hd_t hd);
+
+void ifm_gcry_md_hash_buffer(int algo, void *digest,
+                        const void *buffer, size_t length);
 
 /************************************
  *                                  *

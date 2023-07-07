@@ -102,3 +102,29 @@ gcry_error_t ifm_gcry_pubkey_get_sexp(gcry_sexp_t *r_sexp, int mode, gcry_ctx_t 
 {
     return gcry_pubkey_get_sexp(r_sexp, mode, ctx);
 }
+
+gcry_error_t ifm_gcry_md_enable(gcry_md_hd_t hd, int algo) 
+{
+    return gcry_md_enable(hd, algo);
+}
+
+void ifm_gcry_md_write(gcry_md_hd_t hd, const void *buffer, size_t length)
+{
+    gcry_md_write(hd, buffer, length);
+}
+
+unsigned char *ifm_gcry_md_read(gcry_md_hd_t hd, int algo)
+{
+    return gcry_md_read(hd, algo);
+}
+
+void ifm_gcry_md_close(gcry_md_hd_t hd)
+{
+    gcry_md_close(hd);
+}
+
+void ifm_gcry_md_hash_buffer(int algo, void *digest,
+                        const void *buffer, size_t length)
+                        {
+                            gcry_md_hash_buffer(algo, digest, buffer, length);
+                        }
