@@ -92,6 +92,21 @@ target_link_libraries(mock_ut
     pthread
     )
 add_dependencies(mock_ut sm3_ut md5_ut sha224_ut sha256_ut sha384_ut sha512_ut sha512_224_ut sha512_256_ut gcrypt_md_ut gcrypt_pk_ut aes_ut gcm_ut rsa_ut gcrypt_basic_ut)
+
+# gcrypt benchmark
+add_executable(gcrypt_benchmark gcrypt_benchmark.cpp)
+target_include_directories(gcrypt_benchmark PUBLIC
+    PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}
+    PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/gcrypt
+    PUBLIC ${CMAKE_SOURCE_DIR}/src
+    PUBLIC ${CMAKE_SOURCE_DIR}/src/gcrypt
+    )
+target_link_libraries(gcrypt_benchmark
+    pthread
+    libifm_libgcrypt
+    gpg-error
+    )
+
 IF(ENABLE_GCOV)
     add_custom_target(coverage
         COMMAND lcov --directory . --zerocounters --rc lcov_branch_coverage=1
