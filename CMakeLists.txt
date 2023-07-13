@@ -80,7 +80,7 @@ configure_file(
 )
 
 add_subdirectory(${CMAKE_CURRENT_SOURCE_DIR}/src)
-
+add_subdirectory(${CMAKE_CURRENT_SOURCE_DIR}/bench)
 # unit test and coverage
 set(CMAKE_VERBOSE_MAKEFILE OFF)
 if(ENABLE_GCOV)
