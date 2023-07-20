@@ -23,7 +23,10 @@
 #include <gtest/gtest.h>
 
 #include "sm3.h"
+#include "sm3_meta.h"
 #include "testutils.h"
+
+#define sm3_ctx ifm_sm3_ctx
 
 const struct nettle_hash nettle_ifm_sm3
 = _NETTLE_HASH(sm3, SM3);
