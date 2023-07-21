@@ -5,7 +5,8 @@
  *
  * Authors:
  * YutingNie yvettemisaki@outlook.com
- *
+ * YihuiTan 202121632838@smail.edu.cn.com
+ * 
  * This library is free software; you can redistribute it and/or
  * modify it under the terms of the GNU Lesser General Public
  * License as published by the Free Software Foundation; either
@@ -34,6 +35,13 @@ extern "C" {
 
 /* Define the asymmetric encryption functions. */
 #define gcry_md_algo_info ifm_gcry_md_algo_info
+#define gcry_cipher_open ifm_gcry_cipher_open
+#define gcry_cipher_setkey ifm_gcry_cipher_setkey
+#define gcry_cipher_close ifm_gcry_cipher_close
+#define gcry_cipher_setiv ifm_gcry_cipher_setiv
+#define gcry_cipher_decrypt ifm_gcry_cipher_decrypt
+#define gcry_cipher_get_algo_keylen ifm_gcry_cipher_get_algo_keylen
+#define gcry_cipher_get_algo_blklen ifm_gcry_cipher_get_algo_blklen
 #define gcry_md_open ifm_gcry_md_open
 #define gcry_md_enable ifm_gcry_md_enable
 #define gcry_md_write ifm_gcry_md_write
@@ -56,6 +64,23 @@ extern "C" {
 #define gcry_pk_get_param ifm_gcry_pk_get_param
 #define gcry_pubkey_get_sexp ifm_gcry_pubkey_get_sexp
 #define gcry_pk_get_curve ifm_gcry_pk_get_curve
+
+gcry_error_t ifm_gcry_cipher_open(gcry_cipher_hd_t *handle, int algo, int mode, unsigned int flags);
+
+gcry_error_t ifm_gcry_cipher_setkey(gcry_cipher_hd_t hd, const void *key, size_t keylen);
+
+gcry_error_t ifm_gcry_cipher_encrypt(gcry_cipher_hd_t h, void *out, size_t outsize, const void *in, size_t inlen);
+
+void ifm_gcry_cipher_close(gcry_cipher_hd_t h);
+
+gcry_error_t ifm_gcry_cipher_setiv(gcry_cipher_hd_t hd, const void *iv, size_t ivlen);
+
+gcry_error_t ifm_gcry_cipher_decrypt(gcry_cipher_hd_t h, void *out, size_t outsize, const void *in, size_t inlen);
+
+size_t ifm_gcry_cipher_get_algo_keylen(int algo);
+
+size_t ifm_gcry_cipher_get_algo_blklen(int algo);
+
 
 /* Create a message digest object for algorithm ALGO.  FLAGS may be
    given as an bitwise OR of the gcry_md_flags values.  ALGO may be

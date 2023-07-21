@@ -2,8 +2,9 @@
  * Copyright (c) Huawei Technologies Co., Ltd. 2020. All rights reserved.
  *
  * Authors:
- * YutingNie yvettemisaki@outlook.com
- *
+ * YutingNie yvettemisaki@outlook.com 
+ * YihuiTan 202121632838@smail.edu.cn.com
+ * 
  * This library is free software; you can redistribute it and/or
  * modify it under the terms of the GNU Lesser General Public
  * License as published by the Free Software Foundation; either
@@ -20,6 +21,46 @@
  ********************************************************************************/
 #include <stdio.h>
 #include "gcrypt.h"
+
+gcry_error_t ifm_gcry_cipher_open(gcry_cipher_hd_t *handle, int algo, int mode, unsigned int flags)
+{
+    return gcry_cipher_open(handle,  algo,  mode, flags);
+}
+
+gcry_error_t ifm_gcry_cipher_setkey(gcry_cipher_hd_t hd, const void *key, size_t keylen)
+{
+    return gcry_cipher_setkey(hd, key, keylen);
+}
+
+gcry_error_t ifm_gcry_cipher_encrypt(gcry_cipher_hd_t h, void *out, size_t outsize, const void *in, size_t inlen)
+{
+    return gcry_cipher_encrypt(h, out, outsize, in, inlen);
+}
+
+void ifm_gcry_cipher_close(gcry_cipher_hd_t h)
+{
+    return gcry_cipher_close (h);
+}
+
+gcry_error_t ifm_gcry_cipher_setiv(gcry_cipher_hd_t hd, const void *iv, size_t ivlen)
+{
+    return gcry_cipher_setiv(hd, iv, ivlen);
+}
+
+gcry_error_t ifm_gcry_cipher_decrypt(gcry_cipher_hd_t h, void *out, size_t outsize, const void *in, size_t inlen)
+{
+    return gcry_cipher_decrypt(h, out, outsize, in, inlen);
+}
+
+size_t ifm_gcry_cipher_get_algo_keylen(int algo)
+{
+    return gcry_cipher_get_algo_keylen(algo);
+}
+
+size_t ifm_gcry_cipher_get_algo_blklen(int algo)
+{
+    return gcry_cipher_get_algo_blklen(algo);
+}
 
 gcry_error_t ifm_gcry_md_open(gcry_md_hd_t *h, int algo, unsigned int flags)
 {
