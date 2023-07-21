@@ -5,7 +5,6 @@
  *
  * Authors:
  * Haozi007 <liuhao27@huawei.com>
- * jiaji2023 <jiaji@isrc.iscas.ac.cn>
  *
  * This library is free software; you can redistribute it and/or
  * modify it under the terms of the GNU Lesser General Public
@@ -26,12 +25,6 @@
 #include <gmp.h>
 
 #include "rsa_meta.h"
-
-#define md5_ctx ifm_md5_ctx
-#define sha256_ctx ifm_sha256_ctx
-#define sha512_ctx ifm_sha512_ctx
-#define rsa_public_key ifm_rsa_public_key
-#define rsa_private_key ifm_rsa_private_key
 
 void *
 xalloc(size_t size);
@@ -97,26 +90,3 @@ test_hash(const struct nettle_hash *hash,
 	abort();              \
       }                \
   } while(0)
-
-/************** RSA单元测试用 **************/
-namespace rsa_ut {
-    void test_rsa_set_key_1(struct rsa_public_key *pub,
-                            struct rsa_private_key *key);
-
-    void test_rsa_md5(struct rsa_public_key *pub,
-                      struct rsa_private_key *key,
-                      mpz_t expected);
-
-    void test_rsa_sha1(struct rsa_public_key *pub,
-                       struct rsa_private_key *key,
-                       mpz_t expected);
-
-    void test_rsa_sha256(struct rsa_public_key *pub,
-                         struct rsa_private_key *key,
-                         mpz_t expected);
-
-    void test_rsa_sha512(struct rsa_public_key *pub,
-                         struct rsa_private_key *key,
-                         mpz_t expected);
-}
-

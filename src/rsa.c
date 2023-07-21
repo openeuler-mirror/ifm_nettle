@@ -91,27 +91,27 @@ int ifm_rsa_pkcs1_verify(const struct ifm_rsa_public_key *key,
 }
 
 int ifm_rsa_md5_sign(const struct ifm_rsa_private_key *key,
-                     struct ifm_md5_ctx *hash,
+                     struct md5_ctx *hash,
                      mpz_t signature)
 {
-    return rsa_md5_sign((struct rsa_private_key *) key, (struct md5_ctx *) hash, signature);
+    return rsa_md5_sign((struct rsa_private_key *) key, hash, signature);
 }
 
 int ifm_rsa_md5_sign_tr(const struct ifm_rsa_public_key *pub,
                         const struct ifm_rsa_private_key *key,
                         void *random_ctx, nettle_random_func *random,
-                        struct ifm_md5_ctx *hash, mpz_t s)
+                        struct md5_ctx *hash, mpz_t s)
 {
     return rsa_md5_sign_tr((struct rsa_public_key *) pub, (struct rsa_private_key *) key, random_ctx, random,
-                           (struct md5_ctx *) hash, s);
+                           hash, s);
 }
 
 
 int ifm_rsa_md5_verify(const struct ifm_rsa_public_key *key,
-                       struct ifm_md5_ctx *hash,
+                       struct md5_ctx *hash,
                        const mpz_t signature)
 {
-    return rsa_md5_verify((struct rsa_public_key *) key, (struct md5_ctx *) hash, signature);
+    return rsa_md5_verify((struct rsa_public_key *) key, hash, signature);
 }
 
 int ifm_rsa_sha1_sign(const struct ifm_rsa_private_key *key,
@@ -138,51 +138,51 @@ int ifm_rsa_sha1_verify(const struct ifm_rsa_public_key *key,
 }
 
 int ifm_rsa_sha256_sign(const struct ifm_rsa_private_key *key,
-                        struct ifm_sha256_ctx *hash,
+                        struct sha256_ctx *hash,
                         mpz_t signature)
 {
-    return rsa_sha256_sign((struct rsa_private_key *) key, (struct sha256_ctx *) hash, signature);
+    return rsa_sha256_sign((struct rsa_private_key *) key, hash, signature);
 }
 
 int ifm_rsa_sha256_sign_tr(const struct ifm_rsa_public_key *pub,
                            const struct ifm_rsa_private_key *key,
                            void *random_ctx, nettle_random_func *random,
-                           struct ifm_sha256_ctx *hash,
+                           struct sha256_ctx *hash,
                            mpz_t s)
 {
     return rsa_sha256_sign_tr((struct rsa_public_key *) pub, (struct rsa_private_key *) key, random_ctx, random,
-                              (struct sha256_ctx *) hash, s);
+                              hash, s);
 }
 
 int ifm_rsa_sha256_verify(const struct ifm_rsa_public_key *key,
-                          struct ifm_sha256_ctx *hash,
+                          struct sha256_ctx *hash,
                           const mpz_t signature)
 {
-    return rsa_sha256_verify((struct rsa_public_key *) key, (struct sha256_ctx *) hash, signature);
+    return rsa_sha256_verify((struct rsa_public_key *) key, hash, signature);
 }
 
 int ifm_rsa_sha512_sign(const struct ifm_rsa_private_key *key,
-                        struct ifm_sha512_ctx *hash,
+                        struct sha512_ctx *hash,
                         mpz_t signature)
 {
-    return rsa_sha512_sign((struct rsa_private_key *) key, (struct sha512_ctx *) hash, signature);
+    return rsa_sha512_sign((struct rsa_private_key *) key, hash, signature);
 }
 
 int ifm_rsa_sha512_sign_tr(const struct ifm_rsa_public_key *pub,
                            const struct ifm_rsa_private_key *key,
                            void *random_ctx, nettle_random_func *random,
-                           struct ifm_sha512_ctx *hash,
+                           struct sha512_ctx *hash,
                            mpz_t s)
 {
     return rsa_sha512_sign_tr((struct rsa_public_key *) pub, (struct rsa_private_key *) key, random_ctx, random,
-                              (struct sha512_ctx *) hash, s);
+                              hash, s);
 }
 
 int ifm_rsa_sha512_verify(const struct ifm_rsa_public_key *key,
-                          struct ifm_sha512_ctx *hash,
+                          struct sha512_ctx *hash,
                           const mpz_t signature)
 {
-    return rsa_sha512_verify((struct rsa_public_key *) key, (struct sha512_ctx *) hash, signature);
+    return rsa_sha512_verify((struct rsa_public_key *) key, hash, signature);
 }
 
 /* Variants taking the digest as argument. */
