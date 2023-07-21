@@ -83,6 +83,7 @@ _DEFINE_NEW_TEST(rsa_ut rsa_testcases)
 _DEFINE_NEW_TEST(gcrypt_basic_ut gcrypt_basic_testcases)
 _DEFINE_NEW_TEST(xcrypt_basic_ut xcrypt_basic_testcases)
 _DEFINE_NEW_TEST(hmac_ut hmac_testcases)
+_DEFINE_NEW_TEST(gcrypt_basic_cipher_ut gcrypt_basic_cipher_testcases)
 
 
 
@@ -97,7 +98,7 @@ target_link_libraries(mock_ut
     pthread
     )
 
-add_dependencies(mock_ut sm3_ut md5_ut sha224_ut sha256_ut sha384_ut sha512_ut sha512_224_ut sha512_256_ut gcrypt_md_ut gcrypt_pk_ut aes_ut gcm_ut rsa_ut gcrypt_basic_ut xcrypt_basic_ut hmac_ut)
+add_dependencies(mock_ut sm3_ut md5_ut sha224_ut sha256_ut sha384_ut sha512_ut sha512_224_ut sha512_256_ut gcrypt_md_ut gcrypt_pk_ut aes_ut gcm_ut rsa_ut gcrypt_basic_ut xcrypt_basic_ut hmac_ut gcrypt_basic_cipher_ut)
 
 # gcrypt benchmark
 add_executable(gcrypt_benchmark gcrypt_benchmark.cpp)
