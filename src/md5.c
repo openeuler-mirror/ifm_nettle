@@ -28,6 +28,7 @@
 #include "uadk/v1/wd_digest.h"
 #endif
 #include "md5_meta.h"
+#include "ifm_utils.h"
 
 #ifdef __aarch64__
 /**
@@ -167,7 +168,7 @@ void ifm_md5_init(struct ifm_md5_ctx *ctx)
 
 // 对于使用鲲鹏加速的场景下，将原有ctx的内容进行初始化之外，需要额外调用uadk_md5_init初始化UADK所需的配置信息
 #ifdef __aarch64__
-    if (0 != uadk_md5_init(ctx))
+    if (UadkEnabled() == false || 0 != uadk_md5_init(ctx))
     {
         ctx->use_uadk = false;
     }
