@@ -20,10 +20,33 @@
  * License along with this library; if not, write to the Free Software
  * Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA  02110-1301  USA
  ********************************************************************************/
+
+/*
+ * 本代码文件中目前存在的问题：
+ * 由于gcm-aes算法中的加密部分使用到了aes加密，因此需要依赖aes的算法实现
+ * 但是由于aes_meta.h暂时没有合入，以及在bench测试时的依赖关系
+ * 因此暂时依赖aes.h文件，待aes_meta.h后，修改依赖即可
+ * 影响到的变量如下
+ * 1. _AES128_ROUNDS
+ * 2. _AES192_ROUNDS
+ * 3. _AES256_ROUNDS
+ * 4. ifm_aes128_ctx
+ * 5. ifm_aes192_ctx
+ * 6. ifm_aes256_ctx
+ * Author:
+ * lizengyi <lizengyi.src@foxmail.com>
+ */
+
 #ifndef IFM_NETTLE_GCM_META_INCLUDED
 #define IFM_NETTLE_GCM_META_INCLUDED
 
 #include "aes.h"
+
+#ifdef __aarch64__
+#include "uadk/v1/wd.h"
+#include "uadk/v1/wd_bmm.h"
+#include "uadk/v1/wd_aead.h"
+#endif
 
 #ifdef __cplusplus
 extern "C" {
@@ -33,12 +56,31 @@ extern "C" {
 #define GCM_AES192_KEY_SIZE 24
 #define GCM_AES256_KEY_SIZE 32
 
+#define AES128_KEY_SIZE 16
+#define AES192_KEY_SIZE 24
+#define AES256_KEY_SIZE 32
+
 #define GCM_BLOCK_SIZE 16
 #define GCM_IV_SIZE (GCM_BLOCK_SIZE - 4)
 #define GCM_DIGEST_SIZE 16
 #define GCM_TABLE_BITS 8
 
 typedef void ifm_cipher_func(const void *ctx, size_t length, uint8_t *dst, const uint8_t *src);
+
+#ifdef __aarch64__
+#define SQE_SIZE 128
+// uadk gcm最大支持处理16M数据
+#define MAX_BLOCK_SZ 16 * 1024 * 1024
+#define MAX_BLOCK_NM 128
+#define MAX_DATA_SZ (MAX_BLOCK_SZ - GCM_DIGEST_SIZE - GCM_DIGEST_SIZE)
+struct uadk_aead_st {
+    struct wd_queue *pq;
+    struct wcrypto_aead_ctx_setup  setup;
+    struct wcrypto_aead_op_data  opdata;
+    void *pool;
+    void *ctx;
+};
+#endif
 
 union ifm_block16 {
     uint8_t b[16];
@@ -58,8 +100,16 @@ struct ifm_gcm_ctx {
     uint64_t data_size;
 };
 
+#ifdef __aarch64__
+#define IFM_GCM_CTX(type) \
+    { struct ifm_gcm_key key; struct ifm_gcm_ctx gcm; type cipher; \
+    struct uadk_aead_st uadk_ctx; \
+    bool use_uadk; \
+    }
+#else
 #define IFM_GCM_CTX(type) \
     { struct ifm_gcm_key key; struct ifm_gcm_ctx gcm; type cipher; }
+#endif
 
 struct ifm_gcm_aes128_ctx IFM_GCM_CTX(struct ifm_aes128_ctx);
 struct ifm_gcm_aes192_ctx IFM_GCM_CTX(struct ifm_aes192_ctx);
