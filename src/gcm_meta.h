@@ -43,6 +43,7 @@
 #include "aes.h"
 
 #ifdef __aarch64__
+#include "uadk_meta.h"
 #include "uadk/v1/wd.h"
 #include "uadk/v1/wd_bmm.h"
 #include "uadk/v1/wd_aead.h"
@@ -68,18 +69,7 @@ extern "C" {
 typedef void ifm_cipher_func(const void *ctx, size_t length, uint8_t *dst, const uint8_t *src);
 
 #ifdef __aarch64__
-#define SQE_SIZE 128
-// uadk gcm最大支持处理16M数据
-#define MAX_BLOCK_SZ 16 * 1024 * 1024
-#define MAX_BLOCK_NM 128
-#define MAX_DATA_SZ (MAX_BLOCK_SZ - GCM_DIGEST_SIZE - GCM_DIGEST_SIZE)
-struct uadk_aead_st {
-    struct wd_queue *pq;
-    struct wcrypto_aead_ctx_setup  setup;
-    struct wcrypto_aead_op_data  opdata;
-    void *pool;
-    void *ctx;
-};
+#define MAX_DATA_SZ (GCM_MAX_BLOCK_SZ - GCM_DIGEST_SIZE - GCM_DIGEST_SIZE)
 #endif
 
 union ifm_block16 {

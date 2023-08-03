@@ -51,7 +51,7 @@ void ifm_sha256_digest(struct ifm_sha256_ctx *ctx, size_t length, uint8_t *diges
 
 void ifm_sha224_init(struct ifm_sha224_ctx *ctx);
 
-#define ifm_sha224_update ifm_sha256_update
+void ifm_sha224_update(struct ifm_sha224_ctx *ctx, size_t length, const uint8_t *data);
 
 void ifm_sha224_digest(struct ifm_sha224_ctx *ctx, size_t length, uint8_t *digest);
 
@@ -63,19 +63,19 @@ void ifm_sha512_digest(struct ifm_sha512_ctx *ctx, size_t length, uint8_t *diges
 
 void ifm_sha384_init(struct ifm_sha384_ctx *ctx);
 
-#define ifm_sha384_update ifm_sha512_update
+void ifm_sha384_update(struct ifm_sha384_ctx *ctx, size_t length, const uint8_t *data);
 
 void ifm_sha384_digest(struct ifm_sha384_ctx *ctx, size_t length, uint8_t *digest);
 
 void ifm_sha512_224_init(struct ifm_sha512_224_ctx *ctx);
 
-#define ifm_sha512_224_update ifm_sha512_update
+void ifm_sha512_224_update(struct ifm_sha512_224_ctx *ctx, size_t length, const uint8_t *data);
 
 void ifm_sha512_224_digest(struct ifm_sha512_224_ctx *ctx, size_t length, uint8_t *digest);
 
 void ifm_sha512_256_init(struct ifm_sha512_256_ctx *ctx);
 
-#define ifm_sha512_256_update ifm_sha512_update
+void ifm_sha512_256_update(struct ifm_sha512_256_ctx *ctx, size_t length, const uint8_t *data);
 
 void ifm_sha512_256_digest(struct ifm_sha512_256_ctx *ctx, size_t length, uint8_t *digest);
 
