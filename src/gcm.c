@@ -83,9 +83,9 @@ int uadk_gcm_init(struct uadk_aead_st *uadk_ctx)
         if (ret) {
             return FAILED;
         }
-        
+
         memset(&pool_setup, 0, sizeof(pool_setup));
-        pool_setup.block_size = MAX_BLOCK_SZ;
+        pool_setup.block_size = GCM_MAX_BLOCK_SZ;
         pool_setup.block_num = MAX_BLOCK_NM;
         pool_setup.align_size = SQE_SIZE;
         pool = wd_blkpool_create(&q, &pool_setup);
@@ -178,7 +178,7 @@ int uadk_gcm_encrypt(struct uadk_aead_st *uadk_ctx, size_t length, uint8_t *dst,
     memcpy(uadk_ctx->opdata.in + uadk_ctx->opdata.assoc_size, src, length);
     uadk_ctx->opdata.in_bytes = length;
     uadk_ctx->opdata.out_bytes = length + uadk_ctx->opdata.assoc_size + wcrypto_aead_getauthsize(uadk_ctx->ctx);
-    uadk_ctx->opdata.out_buf_bytes = MAX_BLOCK_SZ;
+    uadk_ctx->opdata.out_buf_bytes = GCM_MAX_BLOCK_SZ;
     uadk_ctx->opdata.op_type = WCRYPTO_CIPHER_ENCRYPTION_DIGEST;
 
     wcrypto_do_aead(uadk_ctx->ctx, &(uadk_ctx->opdata), NULL);

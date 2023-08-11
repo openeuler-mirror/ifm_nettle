@@ -29,6 +29,12 @@ Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA
 #include <stddef.h>
 #include <stdint.h>
 
+#ifdef __aarch64__
+#include "uadk_meta.h"
+#include "uadk/v1/wd_bmm.h"
+#include "uadk/v1/wd_digest.h"
+#endif
+
 #ifdef __cplusplus
 extern "C" {
 #endif
@@ -41,15 +47,19 @@ extern "C" {
 
 struct ifm_sha256_ctx
 {
-  uint32_t state[_SHA256_DIGEST_LENGTH];    
-  uint64_t count;                           
-  unsigned int index;                       
-  uint8_t block[SHA256_BLOCK_SIZE];        
+    uint32_t state[_SHA256_DIGEST_LENGTH];    
+    uint64_t count;                           
+    unsigned int index;                       
+    uint8_t block[SHA256_BLOCK_SIZE];
+#ifdef __aarch64__
+    struct uadk_digest_st uadk_ctx; /* UADK相关的结构体数据 */
+	bool use_uadk;
+#endif           
 };
+
 #define SHA224_DIGEST_SIZE 28
 #define SHA224_BLOCK_SIZE SHA256_BLOCK_SIZE
 #define ifm_sha224_ctx ifm_sha256_ctx
-
 
 #define SHA512_DIGEST_SIZE 64
 #define SHA512_BLOCK_SIZE 128
@@ -58,10 +68,14 @@ struct ifm_sha256_ctx
 
 struct ifm_sha512_ctx
 {
-  uint64_t state[_SHA512_DIGEST_LENGTH];   
-  uint64_t count_low, count_high;          
-  unsigned int index;                       
-  uint8_t block[SHA512_BLOCK_SIZE];      
+    uint64_t state[_SHA512_DIGEST_LENGTH];
+    uint64_t count_low, count_high;
+    unsigned int index;
+    uint8_t block[SHA512_BLOCK_SIZE];
+#ifdef __aarch64__
+    struct uadk_digest_st uadk_ctx; /* UADK相关的结构体数据 */
+	bool use_uadk;
+#endif      
 };
 
 #define SHA384_DIGEST_SIZE 48

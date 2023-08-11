@@ -25,7 +25,7 @@
 #include <stddef.h>
 #include <stdint.h>
 #ifdef __aarch64__
-#include "uadk/v1/wd.h"
+#include "uadk_meta.h"
 #include "uadk/v1/wd_bmm.h"
 #include "uadk/v1/wd_digest.h"
 #endif
@@ -42,20 +42,6 @@ extern "C" {
 
 /* Digest is kept internally as 4 32-bit words. */
 #define _MD5_DIGEST_LENGTH 4
-
-#ifdef __aarch64__
-#define SQE_SIZE 128
-#define MAX_BLOCK_SZ    1024*1024*1        // 每次hash分段的最大长度
-#define MAX_BLOCK_NM    128
-struct uadk_digest_st
-{
-    struct wd_queue *pq;
-    struct wcrypto_digest_ctx_setup setup;
-    struct wcrypto_digest_op_data opdata;
-    void *pool;
-    void *ctx;
-};
-#endif
 
 struct ifm_md5_ctx
 {
