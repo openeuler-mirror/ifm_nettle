@@ -31,6 +31,7 @@ set(check_nettle_libs
 
 set(check_libgcrypt_libs
     ${LIBGCRYPT_LIBRARY}
+    ${LIBWD_LIBRARY}
     )
 
 set(check_libxcrypt_libs
@@ -86,7 +87,7 @@ endif()
 
 
 aux_source_directory(${CMAKE_CURRENT_SOURCE_DIR}/gcrypt gcrypt_srcs)
-list(REMOVE_ITEM gcrypt_srcs "${CMAKE_CURRENT_SOURCE_DIR}/gcrypt/utils.c")
+list(APPEND gcrypt_srcs "${CMAKE_CURRENT_SOURCE_DIR}/ifm_utils.c")
 message("--  Get top srcs: " ${gcrypt_srcs})
 
 if (ENABLE_LIBIFM_LIBGCRYPT)
