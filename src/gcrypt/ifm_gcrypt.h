@@ -6,7 +6,8 @@
  * Authors:
  * YutingNie yvettemisaki@outlook.com
  * YihuiTan 202121632838@smail.edu.cn.com
- * 
+ * XinghaiLiao xinghailiao@smail.xtu.edu.cn
+ *
  * This library is free software; you can redistribute it and/or
  * modify it under the terms of the GNU Lesser General Public
  * License as published by the Free Software Foundation; either
@@ -48,6 +49,7 @@ extern "C" {
 #define gcry_md_read ifm_gcry_md_read
 #define gcry_md_close ifm_gcry_md_close
 #define gcry_md_hash_buffer ifm_gcry_md_hash_buffer
+#define gcry_md_setkey ifm_gcry_md_setkey
 #define gcry_pk_verify ifm_gcry_pk_verify
 #define gcry_pk_sign ifm_gcry_pk_sign
 #define gcry_pk_encrypt ifm_gcry_pk_encrypt
@@ -64,6 +66,8 @@ extern "C" {
 #define gcry_pk_get_param ifm_gcry_pk_get_param
 #define gcry_pubkey_get_sexp ifm_gcry_pubkey_get_sexp
 #define gcry_pk_get_curve ifm_gcry_pk_get_curve
+#define gcry_md_copy ifm_gcry_md_copy
+#define gcry_md_reset ifm_gcry_md_reset
 
 gcry_error_t ifm_gcry_cipher_open(gcry_cipher_hd_t *handle, int algo, int mode, unsigned int flags);
 
@@ -95,13 +99,19 @@ gcry_error_t ifm_gcry_md_enable(gcry_md_hd_t hd, int algo);
 
 void ifm_gcry_md_write(gcry_md_hd_t hd, const void *buffer, size_t length);
 
+gcry_err_code_t ifm_gcry_md_copy(gcry_md_hd_t *src, gcry_md_hd_t dst);
+
+void ifm_gcry_md_reset(gcry_md_hd_t hd);
+
 unsigned char *ifm_gcry_md_read(gcry_md_hd_t hd, int algo);
 
 void ifm_gcry_md_close(gcry_md_hd_t hd);
 
 void ifm_gcry_md_hash_buffer(int algo, void *digest,
-                        const void *buffer, size_t length);
-
+                             const void *buffer, size_t length);
+
+gcry_error_t ifm_gcry_md_setkey(gcry_md_hd_t hd, const void *key, size_t keylen);
+
 /************************************
  *                                  *
  *    Asymmetric Cipher Functions   *

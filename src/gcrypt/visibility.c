@@ -4,7 +4,8 @@
  * Authors:
  * YutingNie yvettemisaki@outlook.com 
  * YihuiTan 202121632838@smail.edu.cn.com
- * 
+ * xinghailiao xinghailiao@smail.xtu.edu.cn
+ *
  * This library is free software; you can redistribute it and/or
  * modify it under the terms of the GNU Lesser General Public
  * License as published by the Free Software Foundation; either
@@ -21,6 +22,8 @@
  ********************************************************************************/
 #include <stdio.h>
 #include "gcrypt.h"
+#include "gcry_uadk_sha2.h"
+#define gcry_md_hd_t gcry_uadk_sha2_hd_t
 
 gcry_error_t ifm_gcry_cipher_open(gcry_cipher_hd_t *handle, int algo, int mode, unsigned int flags)
 {
@@ -64,13 +67,17 @@ size_t ifm_gcry_cipher_get_algo_blklen(int algo)
 
 gcry_error_t ifm_gcry_md_open(gcry_md_hd_t *h, int algo, unsigned int flags)
 {
-    return gcry_md_open(h, algo, flags);
+    return gcry_uadk_md_open(h, algo, flags);
 }
 
 gcry_error_t ifm_gcry_md_algo_info(int algo, int what, void *buffer, size_t *nbytes)
 {
     return gcry_md_algo_info(algo, what, buffer, nbytes);
     // 该代码用于测试验证是否调用适配层的接口。
+}
+
+gcry_error_t ifm_gcry_md_setkey(gcry_md_hd_t hd, const void *key, size_t keylen) {
+    return gcry_uadk_md_setkey(hd, key, keylen);
 }
 
 /* Asymmetric encryption functions. */
@@ -144,28 +151,37 @@ gcry_error_t ifm_gcry_pubkey_get_sexp(gcry_sexp_t *r_sexp, int mode, gcry_ctx_t 
     return gcry_pubkey_get_sexp(r_sexp, mode, ctx);
 }
 
-gcry_error_t ifm_gcry_md_enable(gcry_md_hd_t hd, int algo) 
+gcry_error_t ifm_gcry_md_enable(gcry_md_hd_t hd, int algo)
 {
-    return gcry_md_enable(hd, algo);
+    return gcry_uadk_md_enable(hd, algo);
 }
 
 void ifm_gcry_md_write(gcry_md_hd_t hd, const void *buffer, size_t length)
 {
-    gcry_md_write(hd, buffer, length);
+    gcry_uadk_md_write(hd, buffer, length);
 }
 
 unsigned char *ifm_gcry_md_read(gcry_md_hd_t hd, int algo)
 {
-    return gcry_md_read(hd, algo);
+    return gcry_uadk_md_read(hd, algo);
 }
 
 void ifm_gcry_md_close(gcry_md_hd_t hd)
 {
-    gcry_md_close(hd);
+    gcry_uadk_md_close(hd);
 }
 
 void ifm_gcry_md_hash_buffer(int algo, void *digest,
-                        const void *buffer, size_t length)
-                        {
-                            gcry_md_hash_buffer(algo, digest, buffer, length);
-                        }
+                             const void *buffer, size_t length)
+{
+    gcry_md_hash_buffer(algo, digest, buffer, length);
+}
+
+gcry_err_code_t ifm_gcry_md_copy(gcry_md_hd_t *dst, gcry_md_hd_t src)
+{
+    return gcry_uadk_md_copy(dst, src);
+}
+
+void ifm_gcry_md_reset(gcry_md_hd_t hd) {
+    gcry_uadk_md_reset(hd);
+}
