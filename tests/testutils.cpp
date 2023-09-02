@@ -26,6 +26,7 @@
 #include "rsa_meta.h"
 #include "md5_meta.h"
 #include "testutils.h"
+#include "cbc.h"
 
 #define md5_ctx ifm_md5_ctx
 #define sha256_ctx ifm_sha256_ctx
@@ -116,15 +117,15 @@ print_hex(size_t length, const uint8_t *data)
 	default:
 	  break;
 	case 0:
-	  printf("\n");
+    fprintf(stderr, "\n");
 	  break;
 	case 8:
-	  printf(" ");
+    fprintf(stderr, " ");
 	  break;
 	}
-      printf("%02x", data[i]);
+    fprintf(stderr, "%02x", data[i]);
     }
-  printf("\n");
+  fprintf(stderr, "\n");
 }
 
 
@@ -185,4 +186,210 @@ void test_hash(const struct nettle_hash *hash,
   free(ctx);
   free(buffer);
   free(input);
+}
+
+void
+test_cipher(const struct nettle_cipher *cipher,
+	    const struct tstring *key,
+	    const struct tstring *cleartext,
+	    const struct tstring *ciphertext)
+{
+  void *ctx = xalloc(cipher->context_size);
+  uint8_t *data = (uint8_t *)xalloc(cleartext->length);
+  size_t length;
+  ASSERT (cleartext->length == ciphertext->length);
+  length = cleartext->length;
+
+  ASSERT (key->length == cipher->key_size);
+  memset(ctx, 0, cipher->context_size);
+  cipher->set_encrypt_key(ctx, key->data);
+  cipher->encrypt(ctx, length, data, cleartext->data);
+
+  if (!MEMEQ(length, data, ciphertext->data))
+    {
+      fprintf(stderr, "Encrypt failed:\nInput:");
+      tstring_print_hex(cleartext);
+      fprintf(stderr, "\nOutput: ");
+      print_hex(length, data);
+      fprintf(stderr, "\nExpected:");
+      tstring_print_hex(ciphertext);
+      fprintf(stderr, "\n");
+      FAIL();
+    }
+  cipher->set_decrypt_key(ctx, key->data);
+  cipher->decrypt(ctx, length, data, data);
+
+  if (!MEMEQ(length, data, cleartext->data))
+    {
+      fprintf(stderr, "Decrypt failed:\nInput:");
+      tstring_print_hex(ciphertext);
+      fprintf(stderr, "\nOutput: ");
+      print_hex(length, data);
+      fprintf(stderr, "\nExpected:");
+      tstring_print_hex(cleartext);
+      fprintf(stderr, "\n");
+      FAIL();
+    }
+
+  free(ctx);
+  free(data);
+}
+
+
+void
+test_cipher_cbc(const struct nettle_cipher *cipher,
+		const struct tstring *key,
+		const struct tstring *cleartext,
+		const struct tstring *ciphertext,
+		const struct tstring *iiv)
+{
+  void *ctx = xalloc(cipher->context_size);
+  uint8_t *data;
+  uint8_t *iv = xalloc(cipher->block_size);
+  size_t length;
+
+  ASSERT (cleartext->length == ciphertext->length);
+  length = cleartext->length;
+
+  ASSERT (key->length == cipher->key_size);
+  ASSERT (iiv->length == cipher->block_size);
+
+  data = xalloc(length);  
+  memset(ctx, 0, cipher->context_size);
+  cipher->set_encrypt_key(ctx, key->data);
+  memcpy(iv, iiv->data, cipher->block_size);
+
+  cbc_encrypt(ctx, cipher->encrypt,
+	      cipher->block_size, iv,
+	      length, data, cleartext->data);
+
+  if (!MEMEQ(length, data, ciphertext->data))
+    {
+      fprintf(stderr, "CBC encrypt failed:\nInput:");
+      tstring_print_hex(cleartext);
+      fprintf(stderr, "\nOutput: ");
+      print_hex(length, data);
+      fprintf(stderr, "\nExpected:");
+      tstring_print_hex(ciphertext);
+      fprintf(stderr, "\n");
+      FAIL();
+    }
+  cipher->set_decrypt_key(ctx, key->data);
+  memcpy(iv, iiv->data, cipher->block_size);
+
+  cbc_decrypt(ctx, cipher->decrypt,
+	      cipher->block_size, iv,
+	      length, data, data);
+
+  if (!MEMEQ(length, data, cleartext->data))
+    {
+      fprintf(stderr, "CBC decrypt failed:\nInput:");
+      tstring_print_hex(ciphertext);
+      fprintf(stderr, "\nOutput: ");
+      print_hex(length, data);
+      fprintf(stderr, "\nExpected:");
+      tstring_print_hex(cleartext);
+      fprintf(stderr, "\n");
+      FAIL();
+    }
+
+  free(ctx);
+  free(data);
+  free(iv);
+}
+
+
+void
+test_aead(const struct nettle_aead *aead,
+	  nettle_hash_update_func *set_nonce,
+	  const struct tstring *key,
+	  const struct tstring *authtext,
+	  const struct tstring *cleartext,
+	  const struct tstring *ciphertext,
+	  const struct tstring *nonce,
+	  const struct tstring *digest)
+{
+  void *ctx = xalloc(aead->context_size);
+  uint8_t *data;
+  uint8_t *buffer = xalloc(aead->digest_size);
+  size_t offset;
+
+  ASSERT (cleartext->length == ciphertext->length);
+
+  ASSERT (key->length == aead->key_size);
+
+  data = xalloc(cleartext->length);
+  memset(ctx, 0, aead->context_size);
+
+  ASSERT(aead->block_size > 0);
+
+  for (offset = 0; offset <= cleartext->length; offset += aead->block_size)
+    {
+      /* encryption */
+      aead->set_encrypt_key(ctx, key->data);
+
+      if (nonce->length != aead->nonce_size)
+	{
+	  ASSERT (set_nonce);
+	  set_nonce (ctx, nonce->length, nonce->data);
+	}
+      else
+	aead->set_nonce(ctx, nonce->data);
+
+      if (aead->update && authtext->length)
+	aead->update(ctx, authtext->length, authtext->data);
+
+      if (offset > 0)
+	aead->encrypt(ctx, offset, data, cleartext->data);
+
+      if (offset < cleartext->length)
+	aead->encrypt(ctx, cleartext->length - offset,
+		      data + offset, cleartext->data + offset);
+
+      if (digest)
+	{
+	  ASSERT (digest->length <= aead->digest_size);
+	  memset(buffer, 0, aead->digest_size);
+	  aead->digest(ctx, digest->length, buffer);
+	  ASSERT(MEMEQ(digest->length, buffer, digest->data));
+	}
+      else
+	ASSERT(!aead->digest);
+
+      ASSERT(MEMEQ(cleartext->length, data, ciphertext->data));
+
+      /* decryption */
+      if (aead->set_decrypt_key)
+	{
+	  aead->set_decrypt_key(ctx, key->data);
+
+	  if (nonce->length != aead->nonce_size)
+	    {
+	      ASSERT (set_nonce);
+	      set_nonce (ctx, nonce->length, nonce->data);
+	    }
+	  else
+	    aead->set_nonce(ctx, nonce->data);
+
+	  if (aead->update && authtext->length)
+	    aead->update(ctx, authtext->length, authtext->data);
+
+	  if (offset > 0)
+	    aead->decrypt (ctx, offset, data, data);
+
+	  if (offset < cleartext->length)
+	    aead->decrypt(ctx, cleartext->length - offset,
+			  data + offset, data + offset);
+	  if (digest)
+	    {
+	      memset(buffer, 0, aead->digest_size);
+	      aead->digest(ctx, digest->length, buffer);
+	      ASSERT(MEMEQ(digest->length, buffer, digest->data));
+	    }
+	  ASSERT(MEMEQ(cleartext->length, data, cleartext->data));
+	}
+    }
+  free(ctx);
+  free(data);
+  free(buffer);
 }

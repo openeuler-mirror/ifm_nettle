@@ -38,7 +38,7 @@
 #include "testutils.h"
 
 void
-test_aead(const struct nettle_aead *aead,
+test_aead_gcm(const struct nettle_aead *aead,
         nettle_hash_update_func *set_nonce,
         const struct tstring *key,
         const struct tstring *authtext,
@@ -195,7 +195,7 @@ const struct nettle_aead ifm_nettle_gcm_aes256 =
 
 TEST(gcm_testcases, test_gcm_2)
 {
-    test_aead(&ifm_nettle_gcm_aes128, NULL,
+    test_aead_gcm(&ifm_nettle_gcm_aes128, NULL,
 	    SHEX("00000000000000000000000000000000"),
 	    SHEX(""),
 	    SHEX("00000000000000000000000000000000"),
@@ -206,7 +206,7 @@ TEST(gcm_testcases, test_gcm_2)
 
 TEST(gcm_testcases, test_gcm_3)
 {
-  	test_aead(&ifm_nettle_gcm_aes128, NULL,
+  	test_aead_gcm(&ifm_nettle_gcm_aes128, NULL,
 	    SHEX("feffe9928665731c6d6a8f9467308308"),
 	    SHEX(""),
 	    SHEX("d9313225f88406e5a55909c5aff5269a"
@@ -223,7 +223,7 @@ TEST(gcm_testcases, test_gcm_3)
 
 TEST(gcm_testcases, test_gcm_4)
 {
-  	test_aead(&ifm_nettle_gcm_aes128, NULL,
+  	test_aead_gcm(&ifm_nettle_gcm_aes128, NULL,
 	    SHEX("feffe9928665731c6d6a8f9467308308"),
 	    SHEX("feedfacedeadbeeffeedfacedeadbeef"
 		 "abaddad2"),
@@ -241,7 +241,7 @@ TEST(gcm_testcases, test_gcm_4)
 
 TEST(gcm_testcases, test_gcm_5)
 {
-  	test_aead(&ifm_nettle_gcm_aes128,
+  	test_aead_gcm(&ifm_nettle_gcm_aes128,
 	    (nettle_hash_update_func *) gcm_aes128_set_iv,
 	    SHEX("feffe9928665731c6d6a8f9467308308"),
 	    SHEX("feedfacedeadbeeffeedfacedeadbeef"
@@ -260,7 +260,7 @@ TEST(gcm_testcases, test_gcm_5)
 
 TEST(gcm_testcases, test_gcm_6)
 {
-  	test_aead(&ifm_nettle_gcm_aes128,
+  	test_aead_gcm(&ifm_nettle_gcm_aes128,
 	    (nettle_hash_update_func *) gcm_aes128_set_iv,
 	    SHEX("feffe9928665731c6d6a8f9467308308"),
 	    SHEX("feedfacedeadbeeffeedfacedeadbeef"
@@ -282,7 +282,7 @@ TEST(gcm_testcases, test_gcm_6)
 
 TEST(gcm_testcases, test_gcm_8)
 {
-  	test_aead(&ifm_nettle_gcm_aes192, NULL,
+  	test_aead_gcm(&ifm_nettle_gcm_aes192, NULL,
 	    SHEX("00000000000000000000000000000000"
 		 "0000000000000000"),
 	    SHEX(""),
@@ -294,7 +294,7 @@ TEST(gcm_testcases, test_gcm_8)
 
 TEST(gcm_testcases, test_gcm_9)
 {
-  	test_aead(&ifm_nettle_gcm_aes192, NULL,
+  	test_aead_gcm(&ifm_nettle_gcm_aes192, NULL,
 	    SHEX("feffe9928665731c6d6a8f9467308308"
 		 "feffe9928665731c"),
 	    SHEX(""),
@@ -312,7 +312,7 @@ TEST(gcm_testcases, test_gcm_9)
 
 TEST(gcm_testcases, test_gcm_10)
 {
-  	test_aead(&ifm_nettle_gcm_aes192, NULL,
+  	test_aead_gcm(&ifm_nettle_gcm_aes192, NULL,
 	    SHEX("feffe9928665731c6d6a8f9467308308"
 		 "feffe9928665731c"),
 	    SHEX("feedfacedeadbeeffeedfacedeadbeef"
@@ -331,7 +331,7 @@ TEST(gcm_testcases, test_gcm_10)
 
 TEST(gcm_testcases, test_gcm_11)
 {
-  	test_aead(&ifm_nettle_gcm_aes192,
+  	test_aead_gcm(&ifm_nettle_gcm_aes192,
 	    (nettle_hash_update_func *) gcm_aes192_set_iv,
 	    SHEX("feffe9928665731c6d6a8f9467308308"
 		 "feffe9928665731c"),
@@ -351,7 +351,7 @@ TEST(gcm_testcases, test_gcm_11)
 
 TEST(gcm_testcases, test_gcm_12)
 {
-  	test_aead(&ifm_nettle_gcm_aes192,
+  	test_aead_gcm(&ifm_nettle_gcm_aes192,
 	    (nettle_hash_update_func *) gcm_aes192_set_iv,
 	    SHEX("feffe9928665731c6d6a8f9467308308"
 		 "feffe9928665731c"),
@@ -374,7 +374,7 @@ TEST(gcm_testcases, test_gcm_12)
 
 TEST(gcm_testcases, test_gcm_14)
 {
-  	test_aead(&ifm_nettle_gcm_aes256, NULL,
+  	test_aead_gcm(&ifm_nettle_gcm_aes256, NULL,
 	    SHEX("00000000000000000000000000000000"
 		 "00000000000000000000000000000000"),
 	    SHEX(""),
@@ -386,7 +386,7 @@ TEST(gcm_testcases, test_gcm_14)
 
 TEST(gcm_testcases, test_gcm_15)
 {
-    test_aead(&ifm_nettle_gcm_aes256, NULL,
+    test_aead_gcm(&ifm_nettle_gcm_aes256, NULL,
 	    SHEX("feffe9928665731c6d6a8f9467308308"
 		 "feffe9928665731c6d6a8f9467308308"),
 	    SHEX(""),
@@ -404,7 +404,7 @@ TEST(gcm_testcases, test_gcm_15)
 
 TEST(gcm_testcases, test_gcm_16)
 {
-    test_aead(&ifm_nettle_gcm_aes256, NULL,
+    test_aead_gcm(&ifm_nettle_gcm_aes256, NULL,
 	    SHEX("feffe9928665731c6d6a8f9467308308"
 		 "feffe9928665731c6d6a8f9467308308"),
 	    SHEX("feedfacedeadbeeffeedfacedeadbeef"
@@ -423,7 +423,7 @@ TEST(gcm_testcases, test_gcm_16)
 
 TEST(gcm_testcases, test_gcm_17)
 {
-    test_aead(&ifm_nettle_gcm_aes256,
+    test_aead_gcm(&ifm_nettle_gcm_aes256,
 	    (nettle_hash_update_func *) gcm_aes256_set_iv,
 	    SHEX("feffe9928665731c6d6a8f9467308308"
 		 "feffe9928665731c6d6a8f9467308308"),
@@ -443,7 +443,7 @@ TEST(gcm_testcases, test_gcm_17)
 
 TEST(gcm_testcases, test_gcm_18)
 {
-    test_aead(&ifm_nettle_gcm_aes256,
+    test_aead_gcm(&ifm_nettle_gcm_aes256,
 	    (nettle_hash_update_func *) gcm_aes256_set_iv,
 	    SHEX("feffe9928665731c6d6a8f9467308308"
 		 "feffe9928665731c6d6a8f9467308308"),
@@ -466,7 +466,7 @@ TEST(gcm_testcases, test_gcm_18)
 
 TEST(gcm_testcases, test_gcm_19)
 {
-    test_aead(&ifm_nettle_gcm_aes128, NULL,
+    test_aead_gcm(&ifm_nettle_gcm_aes128, NULL,
 	    SHEX("feffe9928665731c6d6a8f9467308308"),
 	    SHEX(""),
 	    SHEX("d9313225f88406e5a55909c5aff5269a"

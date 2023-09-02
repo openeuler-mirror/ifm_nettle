@@ -40,7 +40,7 @@
 #ifndef IFM_NETTLE_GCM_META_INCLUDED
 #define IFM_NETTLE_GCM_META_INCLUDED
 
-#include "aes.h"
+#include "aes_meta.h"
 
 #ifdef __aarch64__
 #include "uadk_meta.h"
