@@ -43,6 +43,7 @@
 #include "timing.h"
 
 #include "aes.h"
+#include "cbc.h"
 #include "sha2.h"
 #include "bench_sha2_meta.h"
 #include "bench_gcm_meta.h"
@@ -56,8 +57,8 @@ static double frequency = 0.0;
 #define EXPEND_TEN 10
 #define EXPEND_TWO 2
 #define TIME 1048576.0
-const size_t BENCH_BLOCKS[7] = {512, 1024, 10240, 512 * 1024, 1024 * 1024, 10 * 1024 * 1024, 20 * 1024 * 1024};
-const size_t BENCH_BLOCKS_LENGTH = 7;
+#define BENCH_BLOCKS_LENGTH 6
+const size_t BENCH_BLOCKS[BENCH_BLOCKS_LENGTH] = {512, 1024, 10240, 512 * 1024, 1024 * 1024, 10 * 1024 * 1024};
 
 enum GCM_TYPE {UPDATE, ENCRYPT, DECRYPT};
 
@@ -106,6 +107,48 @@ struct bench_hash_info {
     size_t length;
 };
 
+struct bench_cipher_info {
+    void *ctx;
+    nettle_cipher_func *crypt;
+    uint8_t *data;
+    uint8_t *out;
+    size_t length;
+};
+
+static void
+bench_cipher(void *arg) {
+  struct bench_cipher_info *info = arg;
+  info->crypt(info->ctx, info->length, info->data, info->data);
+}
+
+struct bench_cbc_info {
+    void *ctx;
+    nettle_cipher_func *crypt;
+
+    const uint8_t *src;
+    uint8_t *dst;
+
+    unsigned block_size;
+    uint8_t *iv;
+    size_t length;
+};
+
+static void
+bench_cbc_encrypt(void *arg) {
+  struct bench_cbc_info *info = arg;
+  cbc_encrypt(info->ctx, info->crypt,
+          info->block_size, info->iv,
+          info->length, info->dst, info->src);
+}
+
+static void
+bench_cbc_decrypt(void *arg) {
+  struct bench_cbc_info *info = arg;
+  cbc_decrypt(info->ctx, info->crypt,
+          info->block_size, info->iv,
+          info->length, info->dst, info->src);
+}
+
 struct bench_aead_info {
     void *ctx;
     nettle_set_key_func *set_key;
@@ -151,8 +194,8 @@ static void bench_aead_update(void *arg)
 
 static void header(void)
 {
-    printf("%18s %12s %16s %16s %16s %16s %16s %16s %16s\n", "Algorithm", "mode", "Mbyte(512)/s",
-           "Mbyte(1K)/s", "Mbyte(10K)/s", "Mbyte (512K)/s", "Mbyte(1M)/s", "Mbyte(10M)/s", "Mbyte(20M)/s");
+    printf("%18s %12s %16s %16s %16s %16s %16s %16s %16s\n", "Algorithm", "mode", "Kbyte(512)/s",
+           "Kbyte(1K)/s", "Kbyte(10K)/s", "Kbyte (512K)/s", "Kbyte(1M)/s", "Kbyte(10M)/s", "Kbyte(20M)/s");
 }
 /* Set data[i] = floor(sqrt(i)) */
 static void init_data(uint8_t *data, size_t length)
@@ -175,11 +218,19 @@ static void init_gcm_data(unsigned length, uint8_t *key)
     }
 }
 
+static void init_key(unsigned length, uint8_t *key)
+{
+    unsigned i;
+    for (i = 0; i < length; i++) {
+        key[i] = i;
+    }
+}
+
 static void display(const char *name, const char *mode, unsigned block_size, double *time)
 {
     printf("%18s %12s", name, mode);
     for (int i = 0; i < BENCH_BLOCKS_LENGTH; i++) {
-        printf("%16.2f ", BENCH_BLOCKS[i] / (time[i] * TIME));
+        printf("%16.2f ", BENCH_BLOCKS[i] / 1024 / (time[i] * TIME));
     }
     printf("\n");
 }
@@ -213,6 +264,138 @@ static void time_hash(const struct nettle_hash *hash)
     }
     display(hash->name, "update", hash->block_size, times);
     free(info.ctx);
+}
+
+static int
+prefix_p(const char *prefix, const char *s)
+{
+  size_t i;
+  for (i = 0; prefix[i]; i++)
+    if (prefix[i] != s[i])
+      return 0;
+  return 1;
+}
+
+static int
+block_cipher_p(const struct nettle_cipher *cipher)
+{
+  /* Don't use nettle cbc and ctr for openssl ciphers. */
+  return cipher->block_size > 0 && !prefix_p("openssl", cipher->name);
+}
+
+static void
+time_cipher(const struct nettle_cipher *cipher)
+{
+    void *ctx = xalloc(cipher->context_size);
+    uint8_t *key = xalloc(cipher->key_size);
+    double times[BENCH_BLOCKS_LENGTH];
+    uint8_t *data[BENCH_BLOCKS_LENGTH];
+    for (int i = 0; i < BENCH_BLOCKS_LENGTH; i++) {
+        data[i] = xalloc(sizeof(uint8_t) * BENCH_BLOCKS[i]);
+        init_data(data[i], BENCH_BLOCKS[i]);
+    }
+    uint8_t *src_data[BENCH_BLOCKS_LENGTH];
+    for (int i = 0; i < BENCH_BLOCKS_LENGTH; i++) {
+        src_data[i] = xalloc(sizeof(uint8_t) * BENCH_BLOCKS[i]);
+        init_data(src_data[i], BENCH_BLOCKS[i]);
+    }
+    memset(ctx, 0, cipher->context_size);
+
+    printf("\n");
+
+    {
+        /* Decent initializers are a GNU extension, so don't use it here. */
+        struct bench_cipher_info info;
+        info.ctx = ctx;
+        info.crypt = cipher->encrypt;
+
+        init_key(cipher->key_size, key);
+        cipher->set_encrypt_key(ctx, key);
+
+        for (int i = 0; i < BENCH_BLOCKS_LENGTH; i++) {
+            info.length = BENCH_BLOCKS[i];
+            info.data = src_data[i];
+            info.out = data[i];
+            times[i] = time_function(bench_cipher, &info);
+        }
+        display(cipher->name, "ECB encrypt", cipher->block_size, times);
+    }
+
+    {
+        struct bench_cipher_info info;
+        info.ctx = ctx;
+        info.crypt = cipher->decrypt;
+
+        init_key(cipher->key_size, key);
+        cipher->set_decrypt_key(ctx, key);
+
+        for (int i = 0; i < BENCH_BLOCKS_LENGTH; i++) {
+            info.length = BENCH_BLOCKS[i];
+            info.data = src_data[i];
+            info.out = data[i];
+            times[i] = time_function(bench_cipher, &info);
+        }
+        display(cipher->name, "ECB decrypt", cipher->block_size, times);
+    }
+
+    if (block_cipher_p(cipher)) {
+        uint8_t *iv = xalloc(cipher->block_size);
+
+        /* Do CBC mode */
+        {
+            struct bench_cbc_info info;
+            info.ctx = ctx;
+            info.crypt = cipher->encrypt;
+            info.block_size = cipher->block_size;
+            info.iv = iv;
+
+            memset(iv, 0, cipher->block_size);
+
+            cipher->set_encrypt_key(ctx, key);
+
+            for (int i = 0; i < BENCH_BLOCKS_LENGTH; i++) {
+                info.length = BENCH_BLOCKS[i];
+                info.dst = data[i];
+                info.src = src_data[i];
+                times[i] = time_function(bench_cbc_encrypt, &info);
+            }
+            display(cipher->name, "CBC encrypt", cipher->block_size, times);
+        }
+
+        {
+            struct bench_cbc_info info;
+            info.ctx = ctx;
+            info.crypt = cipher->decrypt;
+            info.block_size = cipher->block_size;
+            info.iv = iv;
+
+            memset(iv, 0, cipher->block_size);
+
+            cipher->set_decrypt_key(ctx, key);
+
+            for (int i = 0; i < BENCH_BLOCKS_LENGTH; i++) {
+                info.length = BENCH_BLOCKS[i];
+                info.dst = data[i];
+                info.src = src_data[i];
+                times[i] = time_function(bench_cbc_decrypt, &info);
+            }
+            display(cipher->name, "CBC decrypt", cipher->block_size, times);
+
+            memset(iv, 0, cipher->block_size);
+
+            for (int i = 0; i < BENCH_BLOCKS_LENGTH; i++) {
+                info.length = BENCH_BLOCKS[i];
+                info.dst = data[i];
+                info.src = data[i];
+                times[i] = time_function(bench_cbc_decrypt, &info);
+            }
+            display(cipher->name, "  (in-place)", cipher->block_size, times);
+        }
+
+        free(iv);
+    }
+    free(ctx);
+    free(key);
 }
 
 static void time_aead_handler(const struct nettle_aead *aead, void (*f)(void *arg), enum GCM_TYPE type)
@@ -323,13 +506,19 @@ int main(int argc, char **argv)
     const struct nettle_hash *hashes[] = {  &nettle_ifm_sha224, &nettle_ifm_sha256,
                                             &nettle_ifm_sha384, &nettle_ifm_sha512,
                                             &nettle_ifm_sha512_224, &nettle_ifm_sha512_256, NULL};
+
+    const struct nettle_cipher *ciphers[] = {
+        &ifm_nettle_aes128, &ifm_nettle_aes192, &ifm_nettle_aes256,
+        NULL
+        };
+
     const struct nettle_aead *aeads[] = {   &nettle_ifm_gcm_aes128, &nettle_ifm_gcm_aes192,
                                             &nettle_ifm_gcm_aes256, NULL};
     enum { OPT_HELP = 300 };
     static const struct option options[] = {    { "help", no_argument, NULL, OPT_HELP },
                                                 { "clock-frequency", required_argument, NULL, 'f' },
                                                 { NULL, 0, NULL, 0 } };
-  
+
     while ((c = getopt_long(argc, argv, "f:", options, NULL)) != -1) {
         switch (c) {
             case 'f':
@@ -357,6 +546,12 @@ int main(int argc, char **argv)
                 time_aead(aeads[i]);
             }
         }
+
+        for (i = 0; ciphers[i]; i++) {
+            if (!alg || strstr(ciphers[i]->name, alg))
+                time_cipher(ciphers[i]);
+        }
+
         for (i = 0; hashes[i]; i++) {
             if (!alg || strstr(hashes[i]->name, alg)) {
                 time_hash(hashes[i]);

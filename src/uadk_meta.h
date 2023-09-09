@@ -35,6 +35,7 @@ Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA
 #define MAX_BLOCK_SZ    1024 * 1024 * 1        // 每次hash分段的最大长度
 #define MAX_BLOCK_NM    128
 #define GCM_MAX_BLOCK_SZ    16 * 1024 * 1024
+#define AES_MAX_BLOCK_SZ    1024*1024*16
 struct uadk_digest_st {
     struct wd_queue *pq;
     struct wcrypto_digest_ctx_setup setup;

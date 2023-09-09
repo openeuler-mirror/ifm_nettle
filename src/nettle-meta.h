@@ -1,9 +1,10 @@
 /******************************************************************************
+ * nettle-meta.h
  *
  * Copyright (c) Huawei Technologies Co., Ltd. 2020. All rights reserved.
  *
  * Authors:
- * huangduirong <huangduirong@huawei.com>
+ * Shankang Ke <shankang@isrc.iscas.ac.cn>
  *
  * This library is free software; you can redistribute it and/or
  * modify it under the terms of the GNU Lesser General Public
@@ -19,39 +20,26 @@
  * License along with this library; if not, write to the Free Software
  * Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA  02110-1301  USA
  ********************************************************************************/
-#ifndef IFM_NETTLE_MD5_H_INCLUDED
-#define IFM_NETTLE_MD5_H_INCLUDED
 
-#include <stddef.h>
-#include <stdint.h>
-#include "md5_meta.h"
-#ifdef __aarch64__
-#include "uadk/v1/wd.h"
-#include "uadk/v1/wd_bmm.h"
-#include "uadk/v1/wd_digest.h"
-#endif
+#ifndef IFM_NETTLE_META_H_INCLUDED
+#define IFM_NETTLE_META_H_INCLUDED
 
+#include "nettle/nettle-meta.h"
 
 #ifdef __cplusplus
 extern "C" {
 #endif
 
-#define md5_init ifm_md5_init
-#define md5_update ifm_md5_update
-#define md5_digest ifm_md5_digest
+#define nettle_aes128 ifm_nettle_aes128
+#define nettle_aes192 ifm_nettle_aes192
+#define nettle_aes256 ifm_nettle_aes256
 
-void ifm_md5_init(struct ifm_md5_ctx *ctx);
-
-void ifm_md5_update(struct ifm_md5_ctx *ctx,
-                    size_t length,
-                    const uint8_t *data);
-
-void ifm_md5_digest(struct ifm_md5_ctx *ctx,
-                    size_t length,
-                    uint8_t *digest);
+extern const struct nettle_cipher nettle_aes128;
+extern const struct nettle_cipher nettle_aes192;
+extern const struct nettle_cipher nettle_aes256;
 
 #ifdef __cplusplus
 }
 #endif
 
-#endif /* IFM_NETTLE_MD5_H_INCLUDED */
+#endif /* IFM_NETTLE_META_H_INCLUDED */

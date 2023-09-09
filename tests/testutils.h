@@ -55,11 +55,34 @@ tstring_print_hex(const struct tstring *s);
 void
 print_hex(size_t length, const uint8_t *data);
 
+/* Test functions deallocate their inputs when finished.*/
+void
+test_cipher(const struct nettle_cipher *cipher,
+	    const struct tstring *key,
+	    const struct tstring *cleartext,
+	    const struct tstring *ciphertext);
+
+void
+test_cipher_cbc(const struct nettle_cipher *cipher,
+		const struct tstring *key,
+		const struct tstring *cleartext,
+		const struct tstring *ciphertext,
+		const struct tstring *iv);
+
+void
+test_aead(const struct nettle_aead *aead,
+	  nettle_hash_update_func *set_nonce,
+	  const struct tstring *key,
+	  const struct tstring *authtext,
+	  const struct tstring *cleartext,
+	  const struct tstring *ciphertext,
+	  const struct tstring *nonce,
+	  const struct tstring *digest);
+
 void
 test_hash(const struct nettle_hash *hash,
 	  const struct tstring *msg,
 	  const struct tstring *digest);
-
 
 /* String literal of type unsigned char. The GNUC version is safer. */
 #if __GNUC__
