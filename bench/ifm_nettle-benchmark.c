@@ -48,6 +48,7 @@
 #include "bench_sha2_meta.h"
 #include "bench_gcm_meta.h"
 #include "getopt.h"
+#include "ifm_crypt.h"
 
 static double frequency = 0.0;
 
@@ -498,6 +499,49 @@ static void time_aead(const struct nettle_aead *aead)
     free(info.ctx);
 }
 
+// crypt benchmark
+struct bench_crypt_info {
+    uint8_t *data;
+    size_t length;
+    char *__settings;
+    const char *prefix;
+};
+
+static void bench_crypt(void *arg)
+{
+    struct bench_crypt_info *info = arg;
+    crypt((char *)info->data, info->__settings);
+}
+
+static void init_crypt_data(uint8_t *data, size_t length)
+{
+    unsigned i = 0;
+    for (i = 1; i < length + 1;  i++) {
+        data[i] = i;
+    }
+}
+
+static void time_crypt(const char *algoname, const char *prefix)
+{
+    struct bench_crypt_info info;
+
+    double times[BENCH_BLOCKS_LENGTH];
+    for (int i = 0; i < BENCH_BLOCKS_LENGTH; i++) {
+        info.length = BENCH_BLOCKS[i];
+
+        uint8_t *data = xalloc(sizeof(uint8_t) * info.length);
+        info.data = data;
+        init_crypt_data(data, info.length);
+        info.prefix = prefix;
+        info.__settings = crypt_gensalt(info.prefix, 0, NULL, 0);
+
+        times[i] = time_function(bench_crypt, &info);
+
+        free(data);
+    }
+    display(algoname, "crypt", info.length, times);
+}
+
 int main(int argc, char **argv)
 {
     unsigned i;
@@ -541,6 +585,10 @@ int main(int argc, char **argv)
     header();
     do {
         alg = argv[optind];
+
+        time_crypt("uadk_crypt_sha256", "$5$");
+        time_crypt("uadk_crypt_sha512", "$6$");
+
         for (i = 0; aeads[i]; i++) {
             if (!alg || strstr(aeads[i]->name, alg)) {
                 time_aead(aeads[i]);
