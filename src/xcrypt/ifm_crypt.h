@@ -24,7 +24,7 @@
 #define IFM_LIBXCRYPT_H
 
 #include <stdint.h>
-#include <crypt.h>
+#include "crypt.h"
 
 #ifdef __cplusplus
 extern "C" {

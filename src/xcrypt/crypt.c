@@ -21,25 +21,26 @@
  * Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA  02110-1301  USA
  ********************************************************************************/
 #include "crypt.h"
-
-char *ifm_crypt(const char *__phrase, const char *__setting)
-{
-    return crypt(__phrase, __setting);
-}
+#include "xcrypt_uadk_sha2.h"
 
 char *ifm_crypt_r(const char *__phrase, const char *__setting, struct crypt_data *__restrict __data)
 {
-    return crypt_r(__phrase, __setting, __data);
+    return uadk_crypt_r(__phrase, __setting, __data);
 }
 
 char *ifm_crypt_rn(const char *__phrase, const char *__setting, void *__data, int __size)
 {
-    return crypt_rn(__phrase, __setting, __data, __size);
+    return uadk_crypt_rn(__phrase, __setting, __data, __size);
 }
 
 char *ifm_crypt_ra(const char *__phrase, const char *__setting, void **__data, int *__size)
 {
-    return crypt_ra(__phrase, __setting, __data, __size);
+    return uadk_crypt_ra(__phrase, __setting, __data, __size);
+}
+
+char *ifm_crypt(const char *__phrase, const char *__setting)
+{
+    return uadk_crypt(__phrase, __setting);
 }
 
 char *ifm_crypt_gensalt(const char *__prefix, unsigned long __count, const char *__rbytes, int __nrbytes)

@@ -27,14 +27,17 @@ target_link_libraries(nettle-bench
     pthread
     libifm_nettle
     libifm_libgcrypt
+    libifm_libxcrypt
     gpg-error
     )
 
 target_include_directories(nettle-bench
     PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}
     PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/gcrypt
+    PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/xcrypt
     PUBLIC ${CMAKE_SOURCE_DIR}/src
     PUBLIC ${CMAKE_SOURCE_DIR}/src/gcrypt
+    PUBLIC ${CMAKE_SOURCE_DIR}/src/xcrypt
     )
 set(CMAKE_BUILD_TYPE Debug)
 set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -g")
