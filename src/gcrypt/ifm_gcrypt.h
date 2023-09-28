@@ -35,14 +35,21 @@ extern "C" {
 #endif
 
 /* Define the asymmetric encryption functions. */
+#define gcry_cipher_final(hd) \
+            gcry_cipher_ctl ((hd), GCRYCTL_FINALIZE, NULL, 0)
 #define gcry_md_algo_info ifm_gcry_md_algo_info
 #define gcry_cipher_open ifm_gcry_cipher_open
 #define gcry_cipher_setkey ifm_gcry_cipher_setkey
 #define gcry_cipher_close ifm_gcry_cipher_close
 #define gcry_cipher_setiv ifm_gcry_cipher_setiv
+#define gcry_cipher_encrypt ifm_gcry_cipher_encrypt
 #define gcry_cipher_decrypt ifm_gcry_cipher_decrypt
 #define gcry_cipher_get_algo_keylen ifm_gcry_cipher_get_algo_keylen
 #define gcry_cipher_get_algo_blklen ifm_gcry_cipher_get_algo_blklen
+#define gcry_cipher_ctl ifm_gcry_cipher_ctl
+#define gcry_cipher_checktag ifm_gcry_cipher_checktag
+#define gcry_cipher_gettag ifm_gcry_cipher_gettag
+
 #define gcry_md_open ifm_gcry_md_open
 #define gcry_md_enable ifm_gcry_md_enable
 #define gcry_md_write ifm_gcry_md_write
@@ -85,6 +92,11 @@ size_t ifm_gcry_cipher_get_algo_keylen(int algo);
 
 size_t ifm_gcry_cipher_get_algo_blklen(int algo);
 
+gcry_error_t ifm_gcry_cipher_ctl(gcry_cipher_hd_t h, int cmd, void *buffer, size_t buflen);
+
+gcry_error_t ifm_gcry_cipher_gettag(gcry_cipher_hd_t hd, void *outtag, size_t taglen);
+
+gcry_error_t ifm_gcry_cipher_checktag(gcry_cipher_hd_t hd, const void *intag, size_t taglen);
 
 /* Create a message digest object for algorithm ALGO.  FLAGS may be
    given as an bitwise OR of the gcry_md_flags values.  ALGO may be

@@ -23,36 +23,33 @@
 #include <stdio.h>
 #include "gcrypt.h"
 #include "gcry_uadk_sha2.h"
+#include "gcry_uadk_aes.h"
 #define gcry_md_hd_t gcry_uadk_sha2_hd_t
+#define gcry_cipher_hd_t gcry_uadk_aes_hd_t
 
 gcry_error_t ifm_gcry_cipher_open(gcry_cipher_hd_t *handle, int algo, int mode, unsigned int flags)
 {
-    return gcry_cipher_open(handle,  algo,  mode, flags);
+    return gcry_uadk_cipher_open(handle,  algo,  mode, flags);
 }
 
 gcry_error_t ifm_gcry_cipher_setkey(gcry_cipher_hd_t hd, const void *key, size_t keylen)
 {
-    return gcry_cipher_setkey(hd, key, keylen);
-}
-
-gcry_error_t ifm_gcry_cipher_encrypt(gcry_cipher_hd_t h, void *out, size_t outsize, const void *in, size_t inlen)
-{
-    return gcry_cipher_encrypt(h, out, outsize, in, inlen);
-}
-
-void ifm_gcry_cipher_close(gcry_cipher_hd_t h)
-{
-    return gcry_cipher_close (h);
+    return gcry_uadk_cipher_setkey(hd, key, keylen);
 }
 
 gcry_error_t ifm_gcry_cipher_setiv(gcry_cipher_hd_t hd, const void *iv, size_t ivlen)
 {
-    return gcry_cipher_setiv(hd, iv, ivlen);
+    return gcry_uadk_cipher_setiv(hd, iv, ivlen);
+}
+
+gcry_error_t ifm_gcry_cipher_encrypt(gcry_cipher_hd_t h, void *out, size_t outsize, const void *in, size_t inlen)
+{
+    return gcry_uadk_cipher_encrypt(h, out, outsize, in, inlen);
 }
 
 gcry_error_t ifm_gcry_cipher_decrypt(gcry_cipher_hd_t h, void *out, size_t outsize, const void *in, size_t inlen)
 {
-    return gcry_cipher_decrypt(h, out, outsize, in, inlen);
+    return gcry_uadk_cipher_decrypt(h, out, outsize, in, inlen);
 }
 
 size_t ifm_gcry_cipher_get_algo_keylen(int algo)
@@ -63,6 +60,26 @@ size_t ifm_gcry_cipher_get_algo_keylen(int algo)
 size_t ifm_gcry_cipher_get_algo_blklen(int algo)
 {
     return gcry_cipher_get_algo_blklen(algo);
+}
+
+void ifm_gcry_cipher_close(gcry_cipher_hd_t h)
+{
+    return gcry_uadk_cipher_close(h);
+}
+
+gcry_error_t ifm_gcry_cipher_ctl(gcry_cipher_hd_t hd, int cmd, void *buffer, size_t buflen)
+{
+    return gcry_uadk_cipher_ctl(hd, cmd, buffer, buflen);
+}
+
+gcry_error_t ifm_gcry_cipher_gettag(gcry_cipher_hd_t hd, void *outtag, size_t taglen)
+{
+    return gcry_uadk_cipher_gettag(hd, outtag, taglen);
+}
+
+gcry_error_t ifm_gcry_cipher_checktag(gcry_cipher_hd_t hd, const void *intag, size_t taglen)
+{
+    return gcry_uadk_cipher_checktag(hd, intag, taglen);
 }
 
 gcry_error_t ifm_gcry_md_open(gcry_md_hd_t *h, int algo, unsigned int flags)
