@@ -176,6 +176,50 @@ if (ENABLE_LIBIFM_LIBXCRYPT)
         ARCHIVE DESTINATION ${LIB_INSTALL_DIR_DEFAULT} PERMISSIONS OWNER_READ OWNER_EXECUTE GROUP_READ GROUP_EXECUTE WORLD_READ WORLD_EXECUTE)
 endif()
 
+aux_source_directory(${CMAKE_CURRENT_SOURCE_DIR}/hv2ev hv2ev_srcs)
+# list(REMOVE_ITEM hv2ev_srcs "${CMAKE_CURRENT_SOURCE_DIR}/hv2ev/utils.c")
+message("--  Get top srcs: " ${hv2ev_srcs})
+
+if (ENABLE_LIBIFM_LIBHV2EV)
+    # set libifm_libhv2ev library
+    add_library(libifm_libhv2ev SHARED ${hv2ev_srcs})
+
+    set(libifm_libhv2ev_incs
+        ${CMAKE_CURRENT_SOURCE_DIR}/hv2ev
+        ${CMAKE_BINARY_DIR}/conf
+        ${check_incs}
+    )
+
+    # set libifm_libhv2ev include dirs
+    target_include_directories(libifm_libhv2ev
+        PUBLIC ${libifm_libhv2ev_incs}
+        )
+
+    # set libifm_libhv2ev compile flags
+    set_target_properties(libifm_libhv2ev PROPERTIES PREFIX "")
+    target_link_libraries(libifm_libhv2ev ${check_libhv_libs} hv)
+
+    if (CMAKE_TOOLCHAIN_FILE)
+        target_link_directories(libifm_libhv2ev PUBLIC ${CMAKE_LIBRARY_PATH})
+        target_link_libraries(libifm_libhv2ev ${EXTRAL_LINK_LIBS})
+    endif()
+
+
+    add_library(libifm_libhv2ev_s STATIC ${hv2ev_srcs})
+    target_include_directories(libifm_libhv2ev_s
+        PUBLIC ${libifm_libhv2ev_incs}
+        )
+    set_target_properties(libifm_libhv2ev_s PROPERTIES PREFIX "")
+    set_target_properties(libifm_libhv2ev_s PROPERTIES OUTPUT_NAME libifm_libhv2ev)
+
+    # install all files
+    install(TARGETS libifm_libhv2ev
+        LIBRARY DESTINATION ${LIB_INSTALL_DIR_DEFAULT} PERMISSIONS OWNER_READ OWNER_EXECUTE GROUP_READ GROUP_EXECUTE WORLD_READ WORLD_EXECUTE)
+    install(TARGETS libifm_libhv2ev_s
+        ARCHIVE DESTINATION ${LIB_INSTALL_DIR_DEFAULT} PERMISSIONS OWNER_READ OWNER_EXECUTE GROUP_READ GROUP_EXECUTE WORLD_READ WORLD_EXECUTE)
+    install(FILES hv2ev/hv2ev.h DESTINATION ${INCLUDE_INSTALL_DIR_DEFAULT} PERMISSIONS OWNER_READ GROUP_READ WORLD_READ)
+endif()
+
 aux_source_directory(${CMAKE_CURRENT_SOURCE_DIR}/verto verto_srcs)
 # list(APPEND verto_srcs "${CMAKE_CURRENT_SOURCE_DIR}/ifm_utils.c")
 message("--  Get top srcs: " ${verto_srcs})
