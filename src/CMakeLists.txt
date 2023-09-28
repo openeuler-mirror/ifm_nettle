@@ -38,6 +38,10 @@ set(check_libxcrypt_libs
     ${LIBXCRYPT_LIBRARY}
     )
 
+set(check_libhv_libs
+    ${LIBHV_LIBRARY}
+    )
+
 list(REMOVE_DUPLICATES check_incs)
 list(REMOVE_DUPLICATES check_nettle_libs)
 
@@ -170,4 +174,35 @@ if (ENABLE_LIBIFM_LIBXCRYPT)
         LIBRARY DESTINATION ${LIB_INSTALL_DIR_DEFAULT} PERMISSIONS OWNER_READ OWNER_EXECUTE GROUP_READ GROUP_EXECUTE WORLD_READ WORLD_EXECUTE)
     install(TARGETS libifm_libxcrypt_s
         ARCHIVE DESTINATION ${LIB_INSTALL_DIR_DEFAULT} PERMISSIONS OWNER_READ OWNER_EXECUTE GROUP_READ GROUP_EXECUTE WORLD_READ WORLD_EXECUTE)
+endif()
+
+aux_source_directory(${CMAKE_CURRENT_SOURCE_DIR}/verto verto_srcs)
+# list(APPEND verto_srcs "${CMAKE_CURRENT_SOURCE_DIR}/ifm_utils.c")
+message("--  Get top srcs: " ${verto_srcs})
+
+if (ENABLE_LIBIFM_LIBVERTO)
+    add_library(libifm_libverto SHARED ${verto_srcs})
+
+    set(libifm_verto_incs
+        ${CMAKE_CURRENT_SOURCE_DIR}/verto
+    )
+
+    # set libifm_libverto include dirs
+    target_include_directories(libifm_libverto
+        PUBLIC ${libifm_verto_incs}
+        )
+    set_target_properties(libifm_libverto PROPERTIES PREFIX "")
+    target_link_libraries(libifm_libverto ${check_libhv_libs} hv)
+
+
+    add_library(libifm_libverto_s STATIC ${verto_srcs})
+    target_include_directories(libifm_libverto_s
+        PUBLIC ${libifm_verto_incs}
+        )
+    
+    set_target_properties(libifm_libverto_s PROPERTIES PREFIX "")
+    set_target_properties(libifm_libverto_s PROPERTIES OUTPUT_NAME libifm_libverto)
+
+    # add_executable(libifm_libverto_e ${ifm_libverto_srcs} ${libifm_libverto_incs})
+    # target_link_libraries(libifm_libverto_e hv)
 endif()
