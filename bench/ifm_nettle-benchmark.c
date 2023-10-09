@@ -53,13 +53,14 @@
 static double frequency = 0.0;
 
 /* Process BENCH_BLOCK bytes at a time, for BENCH_INTERVAL seconds. */
+#define RANDOM_NUM 26
 #define BENCH_INTERVAL 0.1
 #define BENCH_BLOCK 10240
 #define EXPEND_TEN 10
 #define EXPEND_TWO 2
-#define TIME 1048576.0
-#define BENCH_BLOCKS_LENGTH 6
-const size_t BENCH_BLOCKS[BENCH_BLOCKS_LENGTH] = {512, 1024, 10240, 512 * 1024, 1024 * 1024, 10 * 1024 * 1024};
+#define BENCH_BLOCKS_LENGTH 7
+const size_t BENCH_BLOCKS[BENCH_BLOCKS_LENGTH] = {512, 1024, 4 * 1024, 10240, 512 * 1024, \
+                                                  1024 * 1024, 10 * 1024 * 1024};
 
 enum GCM_TYPE {UPDATE, ENCRYPT, DECRYPT};
 
@@ -71,7 +72,7 @@ static void die(const char *format, ...)
     int re = vfprintf(stderr, format, args);
     if (re < 0) {
         printf("vf error");
-        return ;
+        return;
     }
     va_end(args);
 
@@ -195,35 +196,39 @@ static void bench_aead_update(void *arg)
 
 static void header(void)
 {
-    printf("%18s %12s %16s %16s %16s %16s %16s %16s %16s\n", "Algorithm", "mode", "Kbyte(512)/s",
-           "Kbyte(1K)/s", "Kbyte(10K)/s", "Kbyte (512K)/s", "Kbyte(1M)/s", "Kbyte(10M)/s", "Kbyte(20M)/s");
+    printf("%18s %12s %16s %16s %16s %16s %16s %16s %16s %16s\n", "Algorithm", "mode", "Mbyte(512)/s",
+           "Mbyte(1K)/s", "Mbyte(4K)/s", "Mbyte(10K)/s",
+           "Mbyte (512K)/s", "Mbyte(1M)/s", "Mbyte(10M)/s", "Mbyte(20M)/s");
 }
 /* Set data[i] = floor(sqrt(i)) */
 static void init_data(uint8_t *data, size_t length)
 {
     unsigned i = 0;
     unsigned j = 0;
+    unsigned int seed;
     for (i = j = 0; i < length;  i++) {
         if (j * j < i) {
             j++;
         }
-        data[i] = j;
+        data[i] = rand_r(&seed) % RANDOM_NUM + 'a';
     }
 }
 
 static void init_gcm_data(unsigned length, uint8_t *key)
 {
     unsigned i;
+    unsigned int seed;
     for (i = 0; i < length; i++) {
-        key[i] = i;
+        key[i] = rand_r(&seed) % RANDOM_NUM + 'a';
     }
 }
 
 static void init_key(unsigned length, uint8_t *key)
 {
     unsigned i;
+    unsigned int seed;
     for (i = 0; i < length; i++) {
-        key[i] = i;
+        key[i] = rand_r(&seed) % RANDOM_NUM + 'a';
     }
 }
 
@@ -231,7 +236,7 @@ static void display(const char *name, const char *mode, unsigned block_size, dou
 {
     printf("%18s %12s", name, mode);
     for (int i = 0; i < BENCH_BLOCKS_LENGTH; i++) {
-        printf("%16.2f ", BENCH_BLOCKS[i] / 1024 / (time[i] * TIME));
+        printf("%16.2f ", BENCH_BLOCKS[i] / 1024.0 / 1024.0 / (time[i]));
     }
     printf("\n");
 }
@@ -345,6 +350,7 @@ time_cipher(const struct nettle_cipher *cipher)
         /* Do CBC mode */
         {
             struct bench_cbc_info info;
+            memset(ctx, 0, cipher->context_size);
             info.ctx = ctx;
             info.crypt = cipher->encrypt;
             info.block_size = cipher->block_size;
@@ -365,6 +371,7 @@ time_cipher(const struct nettle_cipher *cipher)
 
         {
             struct bench_cbc_info info;
+            memset(ctx, 0, cipher->context_size);
             info.ctx = ctx;
             info.crypt = cipher->decrypt;
             info.block_size = cipher->block_size;
@@ -586,8 +593,15 @@ int main(int argc, char **argv)
     do {
         alg = argv[optind];
 
-        time_crypt("uadk_crypt_sha256", "$5$");
-        time_crypt("uadk_crypt_sha512", "$6$");
+        for (i = 0; hashes[i]; i++) {
+            if (!alg || strstr(hashes[i]->name, alg)) {
+                time_hash(hashes[i]);
+            }
+        }
+        for (i = 0; ciphers[i]; i++) {
+            if (!alg || strstr(ciphers[i]->name, alg))
+                time_cipher(ciphers[i]);
+        }
 
         for (i = 0; aeads[i]; i++) {
             if (!alg || strstr(aeads[i]->name, alg)) {
@@ -595,16 +609,8 @@ int main(int argc, char **argv)
             }
         }
 
-        for (i = 0; ciphers[i]; i++) {
-            if (!alg || strstr(ciphers[i]->name, alg))
-                time_cipher(ciphers[i]);
-        }
-
-        for (i = 0; hashes[i]; i++) {
-            if (!alg || strstr(hashes[i]->name, alg)) {
-                time_hash(hashes[i]);
-            }
-        }
+        time_crypt("uadk_crypt_sha256", "$5$");
+        time_crypt("uadk_crypt_sha512", "$6$");
         optind++;
     } while (alg && argv[optind]);
     return 0;

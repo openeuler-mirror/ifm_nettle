@@ -113,19 +113,19 @@ void ifm_nettle_cbc_decrypt(const void *ctx, nettle_cipher_func *f,
     bool *p_use_uadk = NULL;
     int ret = 0;
 
-    if (f == (nettle_cipher_func *)ifm_aes128_encrypt) {  // NOLINT
+    if (f == (nettle_cipher_func *)ifm_aes128_decrypt) {  // NOLINT
         ctx_128 = (struct ifm_aes128_ctx *)ctx;
         uadk_ctx = &(ctx_128->uadk_ctx);
         uadk_key = ctx_128->uadk_key;
         key_len = AES128_KEY_SIZE;
         p_use_uadk = &(ctx_128->use_uadk);
-    } else if (f == (nettle_cipher_func *)ifm_aes192_encrypt) {  // NOLINT
+    } else if (f == (nettle_cipher_func *)ifm_aes192_decrypt) {  // NOLINT
         ctx_192 = (struct ifm_aes192_ctx *)ctx;
         uadk_ctx = &(ctx_192->uadk_ctx);
         uadk_key = ctx_192->uadk_key;
         key_len = AES192_KEY_SIZE;
         p_use_uadk = &(ctx_192->use_uadk);
-    } else if (f == (nettle_cipher_func *)ifm_aes256_encrypt) {  // NOLINT
+    } else if (f == (nettle_cipher_func *)ifm_aes256_decrypt) {  // NOLINT
         ctx_256 = (struct ifm_aes256_ctx *)ctx;
         uadk_ctx = &(ctx_256->uadk_ctx);
         uadk_key = ctx_256->uadk_key;

@@ -56,6 +56,8 @@ test_aead_gcm(const struct nettle_aead *aead,
     ASSERT (key->length == aead->key_size);
     ASSERT(aead->block_size > 0);
 
+    memset(ctx, 0, aead->context_size);
+
     buffer = (uint8_t*)xalloc(aead->digest_size);
     in = (uint8_t*)xalloc(cleartext->length + aead->block_size - 1);
     out = (uint8_t*)xalloc(cleartext->length + aead->block_size - 1);

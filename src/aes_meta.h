@@ -26,6 +26,7 @@
 
 #include <stdbool.h>
 #include "nettle-meta.h"
+#include "uadk_meta.h"
 #ifdef __aarch64__
 #include "uadk/v1/wd.h"
 #include "uadk/v1/wd_bmm.h"
@@ -41,17 +42,6 @@
 #define AES128_KEY_SIZE 16
 #define AES192_KEY_SIZE 24
 #define AES256_KEY_SIZE 32
-
-#ifdef __aarch64__
-struct uadk_cipher_st {
-    struct wd_queue *q;
-    void *pool;
-    void *ctx;
-    struct wcrypto_cipher_op_data opdata;
-    enum wcrypto_cipher_mode mode;
-    bool set_key;
-};
-#endif
 
 struct ifm_aes128_ctx {
     uint32_t keys[4 * (IFM_AES128_ROUNDS + 1)];

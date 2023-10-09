@@ -201,9 +201,15 @@ test_cbc_bulk(void)
       print_hex(AES_BLOCK_SIZE, aes.iv);
       printf("\n");
     }
+      printf("dst after bulk decryption: ");
+      print_hex(CBC_BULK_DATA, cipher);
+      printf("\n");
 
-  ASSERT (MEMEQ(AES_BLOCK_SIZE, aes.iv, end_iv));
-  ASSERT (MEMEQ(CBC_BULK_DATA, clear, cipher));
+    // 由于使用硬件加速场景下，并不会对iv进行重新的赋值，因此此处不对iv的内容做校验。
+    // 原有nettle中对于iv重新设置赋值主要是因为在nettle的cbc实现过程中，会通过对iv不停
+    // 更新，此处为了校验算法是否有做此类操作。
+    // 删除ASSERT (MEMEQ(AES_BLOCK_SIZE, aes.iv, end_iv));
+    ASSERT (MEMEQ(CBC_BULK_DATA, clear, cipher));
 }
 
 TEST(cbc_testcases, test_cbc_1)

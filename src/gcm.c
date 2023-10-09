@@ -50,95 +50,55 @@
 
 #ifdef __aarch64__
 
-#define FAILED 1
-
-void uadk_ctx_setup(struct uadk_aead_st *uadk_ctx)
+int uadk_ctx_setup(struct uadk_aead_st *uadk_ctx)
 {
-    memset(&(uadk_ctx->setup), 0, sizeof(uadk_ctx->setup));
-    uadk_ctx->setup.calg = WCRYPTO_CIPHER_AES;
-    uadk_ctx->setup.cmode = WCRYPTO_CIPHER_GCM;
+    IFMUadkShareCtx *p_share_ctx = NULL;
 
-    uadk_ctx->setup.br.alloc = (void *)wd_alloc_blk;
-    uadk_ctx->setup.br.free = (void *)wd_free_blk;
-    uadk_ctx->setup.br.iova_map = (void *)wd_blk_iova_map;
-    uadk_ctx->setup.br.iova_unmap = (void *)wd_blk_iova_unmap;
-    uadk_ctx->setup.br.get_bufsize = (void *)wd_blksize;
-    uadk_ctx->setup.br.usr = uadk_ctx->pool;
+    p_share_ctx = get_uadk_ctx(IFM_UADK_ALG_AEAD, WCRYPTO_CIPHER_AES, WCRYPTO_CIPHER_GCM, false);
+    if (p_share_ctx == NULL) {
+        IFM_ERR("uadk_ctx_setup: get_uadk_ctx failed\n");
+        return FAILED;
+    }
+    uadk_ctx->ctx = p_share_ctx->ctx;
+    uadk_ctx->p_share_ctx = p_share_ctx;
+
+    if (wcrypto_aead_setauthsize(uadk_ctx->ctx, GCM_DIGEST_SIZE)) {
+        IFM_ERR("uadk_ctx_setup: wcrypto_aead_setauthsize failed\n");
+        return FAILED;
+    }
+
+    return 0;
 }
 
 // 非0返回表明init失败
 int uadk_gcm_init(struct uadk_aead_st *uadk_ctx)
 {
-    static struct wd_queue q;
-    static struct wd_blkpool_setup pool_setup;
-    static void *pool = NULL;
-    static bool q_init = false;
-    int ret = 0;
-    void *ctx = NULL;
-
-    if (!q_init) {
-        memset(&q, 0, sizeof(q));
-        q.capa.alg = "aead";
-        ret = wd_request_queue(&q);
-        if (ret) {
+    if (uadk_ctx->p_share_ctx == NULL) {
+        if (0 != uadk_ctx_setup(uadk_ctx)) {
+            IFM_ERR("uadk_gcm_init: uadk_ctx_setup failed\n");
             return FAILED;
         }
+    }
 
-        memset(&pool_setup, 0, sizeof(pool_setup));
-        pool_setup.block_size = GCM_MAX_BLOCK_SZ;
-        pool_setup.block_num = MAX_BLOCK_NM;
-        pool_setup.align_size = SQE_SIZE;
-        pool = wd_blkpool_create(&q, &pool_setup);
-        if (!pool) {
-            wd_release_queue(&q);
-            return FAILED;
+    if (uadk_ctx->p_share_opdata == NULL) {
+        uadk_ctx->p_share_opdata = get_uadk_opdata(IFM_UADK_ALG_AEAD);
+        if (!uadk_ctx->p_share_opdata) {
+            IFM_ERR("uadk_gcm_init: get_uadk_opdata failed\n");
+            return -1;
         }
-        q_init = true;
-    }
-    uadk_ctx->pool = pool;
-    uadk_ctx_setup(uadk_ctx);
-    uadk_ctx->pq = &q;
-    
-    ctx = wcrypto_create_aead_ctx(&q, &(uadk_ctx->setup));
-    if (!ctx) {
-        return FAILED;
-    }
-    uadk_ctx->ctx = ctx;
-
-    if (wcrypto_aead_setauthsize(uadk_ctx->ctx, GCM_DIGEST_SIZE)) {
-        return FAILED;
-    }
-    memset(&(uadk_ctx->opdata), 0, sizeof(struct wcrypto_aead_op_data));
-    
-    // 预先申请gcm操作必要的三块内存空间，如存在申请失败情况，返回init错误
-    uadk_ctx->opdata.in = wd_alloc_blk(uadk_ctx->pool);
-    if (!uadk_ctx->opdata.in) {
-        return FAILED;
+        uadk_ctx->p_opdata = (struct wcrypto_aead_op_data *)(uadk_ctx->p_share_opdata->opdata);
     }
 
-    uadk_ctx->opdata.out = wd_alloc_blk(uadk_ctx->pool);
-    if (!uadk_ctx->opdata.out) {
-        return FAILED;
-    }
-
-    uadk_ctx->opdata.iv = wd_alloc_blk(uadk_ctx->pool);
-    if (!uadk_ctx->opdata.iv) {
-        return FAILED;
-    }
-
-    return ret;
+    return 0;
 }
 
 void free_uadk(struct uadk_aead_st *uadk_ctx)
 {
-    if (uadk_ctx->opdata.in)
-        wd_free_blk(uadk_ctx->pool, uadk_ctx->opdata.in);
-    if (uadk_ctx->opdata.iv)
-        wd_free_blk(uadk_ctx->pool, uadk_ctx->opdata.iv);
-    if (uadk_ctx->opdata.out)
-        wd_free_blk(uadk_ctx->pool, uadk_ctx->opdata.out);
-    if (uadk_ctx->ctx)
-        wcrypto_del_aead_ctx(uadk_ctx->ctx);
+    free_uadk_opdata(IFM_UADK_ALG_AEAD, uadk_ctx->p_share_opdata);
+    free_uadk_ctx(IFM_UADK_ALG_AEAD, uadk_ctx->p_share_ctx);
+    uadk_ctx->ctx = NULL;
+    uadk_ctx->p_share_ctx = NULL;
+    uadk_ctx->p_share_opdata = NULL;
 }
 
 int uadk_gcm_set_key(struct uadk_aead_st *uadk_ctx, uint8_t *key, size_t length)
@@ -148,42 +108,44 @@ int uadk_gcm_set_key(struct uadk_aead_st *uadk_ctx, uint8_t *key, size_t length)
 
 void uadk_gcm_set_iv(struct uadk_aead_st *uadk_ctx, size_t length, const uint8_t *iv)
 {
-    memset(uadk_ctx->opdata.iv, 0, GCM_IV_SIZE);
-    memcpy(uadk_ctx->opdata.iv, iv, length);
+    memset(uadk_ctx->p_opdata->iv, 0, GCM_IV_SIZE);
+    memcpy(uadk_ctx->p_opdata->iv, iv, length);
 
-    uadk_ctx->opdata.iv_bytes = GCM_IV_SIZE;
+    uadk_ctx->p_opdata->iv_bytes = GCM_IV_SIZE;
 }
 
 int uadk_gcm_update(struct uadk_aead_st *uadk_ctx, size_t length, const uint8_t *data)
 {
     // 当长度超过uadk的aead算法目前支持数据范围，改用nettle执行
-    if (uadk_ctx->opdata.assoc_size + length > MAX_DATA_SZ) {
+    if (uadk_ctx->p_opdata->assoc_size + length > MAX_DATA_SZ) {
         return FAILED;
     }
     // 根据gcm算法，附加数据需要在所有数据之前
     // 支持多次update操作
-    memcpy(uadk_ctx->opdata.in + uadk_ctx->opdata.assoc_size, data, length);
-    uadk_ctx->opdata.assoc_size += length;
+    memcpy(uadk_ctx->p_opdata->in + uadk_ctx->p_opdata->assoc_size, data, length);
+    uadk_ctx->p_opdata->assoc_size += length;
     return 0;
 }
 
 int uadk_gcm_encrypt(struct uadk_aead_st *uadk_ctx, size_t length, uint8_t *dst, const uint8_t *src)
 {
-    if (uadk_ctx->opdata.assoc_size + length > MAX_DATA_SZ) {
+    if (uadk_ctx->p_opdata->assoc_size + length > MAX_DATA_SZ) {
         return FAILED;
     }
 
     // 判断此次加密过程是否有附加数据
     // 如有，将明文复制在附加数据之后
-    memcpy(uadk_ctx->opdata.in + uadk_ctx->opdata.assoc_size, src, length);
-    uadk_ctx->opdata.in_bytes = length;
-    uadk_ctx->opdata.out_bytes = length + uadk_ctx->opdata.assoc_size + wcrypto_aead_getauthsize(uadk_ctx->ctx);
-    uadk_ctx->opdata.out_buf_bytes = GCM_MAX_BLOCK_SZ;
-    uadk_ctx->opdata.op_type = WCRYPTO_CIPHER_ENCRYPTION_DIGEST;
+    memcpy(uadk_ctx->p_opdata->in + uadk_ctx->p_opdata->assoc_size, src, length);
+    uadk_ctx->p_opdata->in_bytes = length;
+    uadk_ctx->p_opdata->out_bytes = length + uadk_ctx->p_opdata->assoc_size + wcrypto_aead_getauthsize(uadk_ctx->ctx);
+    uadk_ctx->p_opdata->out_buf_bytes = GCM_MAX_BLOCK_SZ;
+    uadk_ctx->p_opdata->op_type = WCRYPTO_CIPHER_ENCRYPTION_DIGEST;
 
-    wcrypto_do_aead(uadk_ctx->ctx, &(uadk_ctx->opdata), NULL);
+    if (0 != wcrypto_do_aead(uadk_ctx->ctx, uadk_ctx->p_opdata, NULL)) {
+        IFM_ERR("uadk_gcm_encrypt wcrypto_do_aead failed\n");
+    }
 
-    memcpy(dst, uadk_ctx->opdata.out + uadk_ctx->opdata.assoc_size, length);
+    memcpy(dst, uadk_ctx->p_opdata->out + uadk_ctx->p_opdata->assoc_size, length);
     return 0;
 }
 
@@ -194,7 +156,9 @@ int uadk_gcm_decrypt(struct uadk_aead_st *uadk_ctx, size_t length, uint8_t *dst,
 
 void uadk_gcm_digest(struct uadk_aead_st *uadk_ctx, size_t length, uint8_t *digest)
 {
-    memcpy(digest, uadk_ctx->opdata.out + uadk_ctx->opdata.out_bytes - wcrypto_aead_getauthsize(uadk_ctx->ctx), length);
+    memcpy(digest,
+           uadk_ctx->p_opdata->out + uadk_ctx->p_opdata->out_bytes - wcrypto_aead_getauthsize(uadk_ctx->ctx),
+           length);
 }
 
 #endif
