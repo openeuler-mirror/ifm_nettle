@@ -924,7 +924,6 @@ cipher_bench(const char *algoname) {
         buflen = allocated_buflen;
         if (modes[modeidx].blocked)
             buflen = (buflen / blklen) * blklen;
-
         start_timer();
         for (i = err = 0; !err && i < repetitions; i++) {
             if (cipher_with_keysetup) {
@@ -957,8 +956,7 @@ cipher_bench(const char *algoname) {
             if (modes[modeidx].aead_init) {
                 (*modes[modeidx].aead_init)(hd, buflen, modes[modeidx].authlen);
                 gcry_cipher_final (hd);
-                err = cipher_encrypt(hd, outbuf, buflen, buf, buflen,
-                                     modes[modeidx].max_inlen);
+                err = cipher_encrypt(hd, outbuf, buflen, buf, buflen,modes[modeidx].max_inlen);
                 if (err)
                     break;
                 err = gcry_cipher_gettag(hd, outbuf, modes[modeidx].authlen);
@@ -1055,6 +1053,291 @@ cipher_bench(const char *algoname) {
     gcry_free(raw_outbuf);
 }
 
+static void
+uadk_cipher_bench(const char *algoname) {
+    static int header_printed;
+    int algo;
+    gcry_cipher_hd_t hd;
+    int i;
+    int keylen, blklen;
+    char key[128];
+    char *outbuf, *buf;
+    char *raw_outbuf, *raw_buf;
+    size_t allocated_buflen, buflen;
+    int repetitions;
+    static const struct {
+        int mode;
+        const char *name;
+        int blocked;
+        unsigned int max_inlen;
+
+        void (*const aead_init)(gcry_cipher_hd_t hd, size_t buflen, int authlen);
+
+        int req_blocksize;
+        int authlen;
+        int noncelen;
+        int doublekey;
+    } modes[] = {
+            {GCRY_CIPHER_MODE_ECB,      "   ECB/Stream", 1, 0xffffffffU},
+            {GCRY_CIPHER_MODE_CBC,      " CBC/Poly1305", 1, 0xffffffffU,
+                    NULL, 16,                          16, 16},
+            {GCRY_CIPHER_MODE_CFB,      "      CFB",     0, 0xffffffffU,
+                    NULL, 16,                          16, 16},
+            {GCRY_CIPHER_MODE_OFB,      "      OFB",     0, 0xffffffffU,
+                    NULL, 16,                          16, 16},
+            {GCRY_CIPHER_MODE_CTR,      "      CTR",     0, 0xffffffffU,
+                    NULL, 16,                          16, 16},
+            {GCRY_CIPHER_MODE_XTS,      "      XTS",     0, 16 << 20,
+                    NULL,          GCRY_XTS_BLOCK_LEN, 0,  0, 1},
+            {GCRY_CIPHER_MODE_CCM,      "      CCM",     0, 0xffffffffU,
+                    ccm_aead_init, GCRY_CCM_BLOCK_LEN, 8,},
+            {GCRY_CIPHER_MODE_GCM,      "      GCM",     0, 0xffffffffU,
+                    NULL,          GCRY_GCM_BLOCK_LEN, GCRY_GCM_BLOCK_LEN},
+            {GCRY_CIPHER_MODE_OCB,      "      OCB",     1, 0xffffffffU,
+                    NULL, 16,                          16, 15},
+            {GCRY_CIPHER_MODE_EAX,      "      EAX",     0, 0xffffffffU,
+                    NULL, 0,                           8,  8},
+            {0}
+    };
+    int modeidx;
+    gcry_error_t err = GPG_ERR_NO_ERROR;
+
+    if (!algoname) {
+        for (i = 1; i < 400; i++)
+            if (!gcry_cipher_test_algo (i))
+                cipher_bench(gcry_cipher_algo_name(i));
+        return;
+    }
+
+    //256B、512B、1KB、10KB、512KB、1MB
+    int times = 1000;
+    int test_data_size[7] = {256, 512, 1024, 1024 * 10, 1024 * 512, 1024 * 1024 * 1 , 1024 * 1024 * 16 };
+    printf("%s %d %s", "algo\t|\t\t\t\t256B(encrypt)\t256B(decrypt)\t\t\t512B(encrypt)\t512B(decrypt)\t\t\t1KB(encrypt)\t1KB(decrypt)\t\t\t10KB(encrypt)\t10KB(decrypt)\t\t\t512KB(encrypt)\t512KB(decrypt)\t\t\t1MB(encrypt)\t1MB(decrypt)\t\t\t16MB(encrypt)\t16MB(decrypt)|\t\twrite", times, "times");
+    putchar('\n');
+    algo = gcry_cipher_map_name(algoname);
+    if (!algo) {
+        fprintf(stderr, PGM ": invalid cipher algorithm `%s'\n", algoname);
+        exit(1);
+    }
+    keylen = gcry_cipher_get_algo_keylen(algo);
+    if (!keylen) {
+        fprintf(stderr, PGM ": failed to get key length for algorithm `%s'\n",
+                algoname);
+        exit(1);
+    }
+    if (keylen * 2 > sizeof key) {
+        fprintf(stderr, PGM ": algo %d, keylength problem (%d)\n",
+                algo, keylen);
+        exit(1);
+    }
+    for (i = 0; i < keylen * 2; i++)
+        key[i] = i + (clock() & 0xff);
+    blklen = gcry_cipher_get_algo_blklen(algo);
+    if (!blklen) {
+        fprintf(stderr, PGM ": failed to get block length for algorithm `%s'\n",
+                algoname);
+        exit(1);
+    }
+    fflush(stdout);
+    for (modeidx = 0; modes[modeidx].mode; modeidx++) {
+        if(modes[modeidx].mode == GCRY_CIPHER_MODE_ECB) {
+            printf("%s,(ECB/Stream)\t\t", algoname);
+        } else if(modes[modeidx].mode == GCRY_CIPHER_MODE_CBC){
+            printf("%s,(CBC/Poly1305)\t\t", algoname);
+        } else if(modes[modeidx].mode == GCRY_CIPHER_MODE_CFB){
+            printf("%s,(CFB)\t\t\t\t", algoname);
+        } else if(modes[modeidx].mode == GCRY_CIPHER_MODE_OFB){
+            printf("%s,(OFB)\t\t\t\t", algoname);
+        } else if(modes[modeidx].mode == GCRY_CIPHER_MODE_CTR){
+            printf("%s,(CTR)\t\t\t\t", algoname);
+        } else if(modes[modeidx].mode == GCRY_CIPHER_MODE_XTS){
+            printf("%s,(XTS)\t\t\t\t", algoname);
+        } else if(modes[modeidx].mode == GCRY_CIPHER_MODE_CCM){
+            printf("%s,(CCM)\t\t\t\t", algoname);
+        } else if(modes[modeidx].mode == GCRY_CIPHER_MODE_GCM){
+            printf("%s,(GCM)\t\t\t\t", algoname);
+        } else if(modes[modeidx].mode == GCRY_CIPHER_MODE_OCB){
+            printf("%s,(OCB)\t\t\t\t", algoname);
+        } else if(modes[modeidx].mode == GCRY_CIPHER_MODE_EAX){
+            printf("%s,(EAX)\t\t\t\t", algoname);
+        }
+        for (int temp = 0; temp < sizeof(test_data_size) / sizeof(int); temp++) {
+            float n_byte = test_data_size[temp] / 1024.0 * times;
+            allocated_buflen = test_data_size[temp];
+            raw_buf = gcry_xcalloc(allocated_buflen + 15, 1);
+            buf = (raw_buf
+                   + ((16 - ((size_t) raw_buf & 0x0f)) % buffer_alignment));
+            outbuf = raw_outbuf = gcry_xmalloc(allocated_buflen + 15);
+            outbuf = (raw_outbuf
+                      + ((16 - ((size_t) raw_outbuf & 0x0f)) % buffer_alignment));
+            size_t modekeylen = keylen * (!!modes[modeidx].doublekey + 1);
+            int is_stream = modes[modeidx].mode == GCRY_CIPHER_MODE_STREAM
+                            || modes[modeidx].mode == GCRY_CIPHER_MODE_POLY1305;
+            if ((blklen > 1 && is_stream) || (blklen == 1 && !is_stream))
+                continue;
+            if (modes[modeidx].mode == GCRY_CIPHER_MODE_POLY1305
+                && algo != GCRY_CIPHER_CHACHA20)
+                continue;
+            if (modes[modeidx].req_blocksize > 0
+                && blklen != modes[modeidx].req_blocksize) {
+                printf(" %7s %7s", "-", "-");
+                continue;
+            }
+            for (i = 0; i < sizeof buf; i++)
+                buf[i] = i;
+            err = gcry_cipher_open(&hd, algo, modes[modeidx].mode, 0);
+            if (err) {
+                fprintf(stderr, PGM ": error opening cipher `%s'\n", algoname);
+                exit(1);
+            }
+            if (!cipher_with_keysetup) {
+                err = gcry_cipher_setkey(hd, key, modekeylen);
+                if (err) {
+                    fprintf(stderr, "gcry_cipher_setkey failed: %s\n",
+                            gpg_strerror(err));
+                    gcry_cipher_close(hd);
+                    exit(1);
+                }
+            }
+            buflen = allocated_buflen;
+            if (modes[modeidx].blocked)
+                buflen = (buflen / blklen) * blklen;
+            struct timeval start_tval;
+            gettimeofday(&start_tval, NULL);
+            for (i = err = 0; !err && i < times; i++) {
+                if (cipher_with_keysetup) {
+                    err = gcry_cipher_setkey(hd, key, modekeylen);
+                    if (err) {
+                        fprintf(stderr, "gcry_cipher_setkey failed: %s\n",
+                                gpg_strerror(err));
+                        gcry_cipher_close(hd);
+                        exit(1);
+                    }
+                }
+                if (modes[modeidx].noncelen) {
+                    char nonce[100];
+                    size_t noncelen;
+
+                    noncelen = modes[modeidx].noncelen;
+                    if (noncelen > sizeof nonce)
+                        noncelen = sizeof nonce;
+                    memset(nonce, 42, noncelen);
+                    err = gcry_cipher_setiv(hd, nonce, noncelen);
+                    if (err) {
+                        fprintf(stderr, "gcry_cipher_setiv failed: %s\n",
+                                gpg_strerror(err));
+                        gcry_cipher_close(hd);
+                        exit(1);
+                    }
+                }
+                if (modes[modeidx].aead_init) {
+                    (*modes[modeidx].aead_init)(hd, buflen, modes[modeidx].authlen);
+                    gcry_cipher_final (hd);
+                    err = cipher_encrypt(hd, outbuf, buflen, buf, buflen,modes[modeidx].max_inlen);
+                    if (err)
+                        break;
+                    err = gcry_cipher_gettag(hd, outbuf, modes[modeidx].authlen);
+                } else {
+                    gcry_cipher_final (hd);
+                    err = cipher_encrypt(hd, outbuf, buflen, buf, buflen,
+                                         modes[modeidx].max_inlen);
+                }
+            }
+            struct timeval cur_tval;
+            int time_used;
+            gettimeofday(&cur_tval, NULL);
+            time_used = (cur_tval.tv_sec - start_tval.tv_sec) * 1000000 +
+                        cur_tval.tv_usec - start_tval.tv_usec;
+            printf("%.2f Mb/s\t\t", n_byte / time_used * 1000000.0 / 1024.0);
+            fflush(stdout);
+            gcry_cipher_close(hd);
+            if (err) {
+                fprintf(stderr, "gcry_cipher_encrypt failed: %s\n",
+                        gpg_strerror(err));
+                exit(1);
+            }
+
+            err = gcry_cipher_open(&hd, algo, modes[modeidx].mode, 0);
+            if (err) {
+                fprintf(stderr, PGM ": error opening cipher `%s'/n", algoname);
+                exit(1);
+            }
+
+            if (!cipher_with_keysetup) {
+                err = gcry_cipher_setkey(hd, key, modekeylen);
+                if (err) {
+                    fprintf(stderr, "gcry_cipher_setkey failed: %s\n",
+                            gpg_strerror(err));
+                    gcry_cipher_close(hd);
+                    exit(1);
+                }
+            }
+
+            gettimeofday(&start_tval, NULL);
+            for (i = err = 0; !err && i < times; i++) {
+                if (cipher_with_keysetup) {
+                    err = gcry_cipher_setkey(hd, key, modekeylen);
+                    if (err) {
+                        fprintf(stderr, "gcry_cipher_setkey failed: %s\n",
+                                gpg_strerror(err));
+                        gcry_cipher_close(hd);
+                        exit(1);
+                    }
+                }
+
+                if (modes[modeidx].noncelen) {
+                    char nonce[100];
+                    size_t noncelen;
+
+                    noncelen = modes[modeidx].noncelen;
+                    if (noncelen > sizeof nonce)
+                        noncelen = sizeof nonce;
+                    memset(nonce, 42, noncelen);
+                    err = gcry_cipher_setiv(hd, nonce, noncelen);
+                    if (err) {
+                        fprintf(stderr, "gcry_cipher_setiv failed: %s\n",
+                                gpg_strerror(err));
+                        gcry_cipher_close(hd);
+                        exit(1);
+                    }
+                }
+
+                if (modes[modeidx].aead_init) {
+                    (*modes[modeidx].aead_init)(hd, buflen, modes[modeidx].authlen);
+                    gcry_cipher_final (hd);
+                    err = cipher_decrypt(hd, outbuf, buflen, buf, buflen,
+                                         modes[modeidx].max_inlen);
+                    if (err)
+                        break;
+                    err = gcry_cipher_checktag(hd, outbuf, modes[modeidx].authlen);
+                    if (gpg_err_code(err) == GPG_ERR_CHECKSUM)
+                        err = 0;
+                } else {
+                    gcry_cipher_final (hd);
+                    err = cipher_decrypt(hd, outbuf, buflen, buf, buflen,
+                                         modes[modeidx].max_inlen);
+                }
+            }
+            gettimeofday(&cur_tval, NULL);
+            time_used = (cur_tval.tv_sec - start_tval.tv_sec) * 1000000 +
+                        cur_tval.tv_usec - start_tval.tv_usec;
+            printf("%.2f Mb/s\t\t\t\t", n_byte / time_used * 1000000.0 / 1024.0);
+            fflush(stdout);
+            gcry_cipher_close(hd);
+            if (err) {
+                fprintf(stderr, "gcry_cipher_decrypt failed: %s\n",
+                        gpg_strerror(err));
+                exit(1);
+            }
+
+        }
+        printf("\n");
+    }
+
+    putchar('\n');
+    gcry_free(raw_buf);
+    gcry_free(raw_outbuf);
+}
 
 static void
 rsa_bench(int iterations, int print_header, int no_blinding) {
@@ -1876,6 +2159,9 @@ main(int argc, char **argv) {
 
     if (!argc) {
         xgcry_control ((GCRYCTL_ENABLE_QUICK_RANDOM, 0));
+        uadk_cipher_bench("AES");
+        uadk_cipher_bench("AES192");
+        uadk_cipher_bench("AES256");
         uadk_md_bench("SHA224");
         uadk_md_bench("SHA256");
         uadk_md_bench("SHA384");
