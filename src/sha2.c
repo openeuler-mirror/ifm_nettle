@@ -32,93 +32,67 @@
 #ifdef __aarch64__
 int uadk_ctx_init(struct uadk_digest_st *uadk_ctx, enum wcrypto_digest_alg algs)
 {
-    static struct wd_queue q;
-    static struct wd_blkpool_setup pool_setup;
-    static void *pool = NULL;
-    static bool q_init = false;
-    int ret = 0;
-    if (!q_init) {
-        memset(&q, 0, sizeof(q));
-        q.capa.alg = "digest";
-        ret = wd_request_queue(&q);
-        if (ret) {
-            return ret;
-        }
-        
-        memset(&pool_setup, 0, sizeof(pool_setup));
-        pool_setup.block_size = MAX_BLOCK_SZ; // set pool  inv + key + in + out
-        pool_setup.block_num = MAX_BLOCK_NM;
-        pool_setup.align_size = SQE_SIZE;
-        pool = wd_blkpool_create(&q, &pool_setup);
-        
-        q_init = true;
+    IFMUadkShareCtx *p_share_ctx = NULL;
+
+    memset(uadk_ctx, 0, sizeof(struct uadk_digest_st));
+    p_share_ctx = get_uadk_ctx(IFM_UADK_ALG_DIGEST, algs, WCRYPTO_DIGEST_NORMAL, true);
+    if (p_share_ctx == NULL) {
+        IFM_ERR("uadk_ctx_init get_uadk_ctx failed\n");
+        return -1;
     }
-    uadk_ctx->pool = pool;
+    uadk_ctx->ctx = p_share_ctx->ctx;
 
-    uadk_ctx->setup.alg = algs;
-    uadk_ctx->setup.mode = WCRYPTO_DIGEST_NORMAL;
-    uadk_ctx->setup.br.alloc = (void *)wd_alloc_blk;
-    uadk_ctx->setup.br.free = (void *)wd_free_blk;
-    uadk_ctx->setup.br.iova_map = (void *)wd_blk_iova_map;
-    uadk_ctx->setup.br.iova_unmap = (void *)wd_blk_iova_unmap;
-    uadk_ctx->setup.br.get_bufsize = (void *)wd_blksize;
-    uadk_ctx->setup.br.usr = pool;
-    
-    uadk_ctx->pq = &q;
-    uadk_ctx->ctx = wcrypto_create_digest_ctx(&q, &(uadk_ctx->setup));
-    memset(&(uadk_ctx->opdata), 0, sizeof(struct wcrypto_digest_op_data));
-
-    return ret;
+    return 0;
 }
 
-void uadk_ctx_update(struct uadk_digest_st *uadk_ctx, size_t length, const uint8_t *data, __u32 out_bytes_size)
+int uadk_ctx_update(struct uadk_digest_st *uadk_ctx, size_t length, const uint8_t *data, __u32 out_bytes_size)
 {
     const uint8_t *data_pt = NULL;
     size_t total_len = 0;
-    if (NULL == uadk_ctx->ctx) {
-        uadk_ctx->ctx = wcrypto_create_digest_ctx(uadk_ctx->pq, &(uadk_ctx->setup));
+
+    if (!uadk_ctx || !uadk_ctx->ctx) {
+        IFM_ERR("uadk_ctx_update: uadk_ctx->ctx is NULL\n");
+        return -1;
     }
 
-    if (!uadk_ctx->opdata.in) {
-        uadk_ctx->opdata.in = wd_alloc_blk(uadk_ctx->pool);
+    if (!uadk_ctx->p_share_opdata) {
+        uadk_ctx->p_share_opdata = get_uadk_opdata(IFM_UADK_ALG_DIGEST);
+        if (!uadk_ctx->p_share_opdata) {
+            IFM_ERR("uadk_ctx_update: get_uadk_opdata failed\n");
+            return -1;
+        }
+        uadk_ctx->p_opdata = (struct wcrypto_digest_op_data *)(uadk_ctx->p_share_opdata->opdata);
+        uadk_ctx->p_opdata->out_bytes = out_bytes_size;
     }
-    if (!uadk_ctx->opdata.out) {
-        uadk_ctx->opdata.out = wd_alloc_blk(uadk_ctx->pool);
-        uadk_ctx->opdata.out_bytes = out_bytes_size; 
-    }
+
     do {
         data_pt = data + total_len;
         // 分段输入，每段大小为MAX_BLOCK_SZ
         if (total_len + MAX_BLOCK_SZ <= length) {
-            memcpy(uadk_ctx->opdata.in, data_pt, MAX_BLOCK_SZ);
-            uadk_ctx->opdata.in_bytes = MAX_BLOCK_SZ;
-            uadk_ctx->opdata.has_next = true;
+            memcpy(uadk_ctx->p_opdata->in, data_pt, MAX_BLOCK_SZ);
+            uadk_ctx->p_opdata->in_bytes = MAX_BLOCK_SZ;
+            uadk_ctx->p_opdata->has_next = true;
             total_len += MAX_BLOCK_SZ;
         } else {
-            memcpy(uadk_ctx->opdata.in, data_pt, length - total_len);
-            uadk_ctx->opdata.in_bytes = length - total_len;
-            uadk_ctx->opdata.has_next = false;
+            memcpy(uadk_ctx->p_opdata->in, data_pt, length - total_len);
+            uadk_ctx->p_opdata->in_bytes = length - total_len;
+            uadk_ctx->p_opdata->has_next = false;
             total_len = length;
         }
-        wcrypto_do_digest(uadk_ctx->ctx, &(uadk_ctx->opdata), NULL);
+        if (wcrypto_do_digest(uadk_ctx->ctx, uadk_ctx->p_opdata, NULL) != 0) {
+            IFM_ERR("uadk_ctx_update: wcrypto_do_digest failed\n");
+            return -1;
+        }
     } while (total_len < length);
+
+    return 0;
 }
+
 void uadk_ctx_digest(struct uadk_digest_st *uadk_ctx, size_t length, uint8_t *digest)
 {
-    memcpy(digest, uadk_ctx->opdata.out, length);
+    memcpy(digest, uadk_ctx->p_opdata->out, length);
 
-    if (uadk_ctx->opdata.in) {
-        wd_free_blk(uadk_ctx->pool, uadk_ctx->opdata.in);
-        uadk_ctx->opdata.in = NULL;
-    }
-    if (uadk_ctx->opdata.out) {
-        wd_free_blk(uadk_ctx->pool, uadk_ctx->opdata.out);
-        uadk_ctx->opdata.out = NULL;
-    }
-    if (uadk_ctx->ctx) {
-        wcrypto_del_digest_ctx(uadk_ctx->ctx);
-        uadk_ctx->ctx = NULL;
-    }
+    free_uadk_opdata(IFM_UADK_ALG_DIGEST, uadk_ctx->p_share_opdata);
 }
 /**
  * @ingroup uadk_sha256_init
@@ -133,11 +107,11 @@ int uadk_sha256_init(struct ifm_sha256_ctx *ctx)
  * @ingroup uadk_sha256_update
  * @par 将uadk的sha256算法适配成sha256_update算法，该接口的使用场景以及参数同nettle中的sha256_update接口相同
  */
-void uadk_sha256_update(struct ifm_sha256_ctx *ctx,
-                        size_t length,
-                        const uint8_t *data)
+int uadk_sha256_update(struct ifm_sha256_ctx *ctx,
+                       size_t length,
+                       const uint8_t *data)
 {
-    uadk_ctx_update(&(ctx->uadk_ctx), length, data, SHA256_DIGEST_SIZE);
+    return uadk_ctx_update(&(ctx->uadk_ctx), length, data, SHA256_DIGEST_SIZE);
 }
 
 /**
@@ -164,11 +138,11 @@ int uadk_sha224_init(struct ifm_sha224_ctx *ctx)
  * @ingroup uadk_sha224_update
  * @par 将uadk的sha224算法适配成sha224_update算法，该接口的使用场景以及参数同nettle中的sha224_update接口相同
  */
-void uadk_sha224_update(struct ifm_sha224_ctx *ctx,
-                        size_t length,
-                        const uint8_t *data)
+int uadk_sha224_update(struct ifm_sha224_ctx *ctx,
+                       size_t length,
+                       const uint8_t *data)
 {
-    uadk_ctx_update(&(ctx->uadk_ctx), length, data, SHA224_DIGEST_SIZE);
+    return uadk_ctx_update(&(ctx->uadk_ctx), length, data, SHA224_DIGEST_SIZE);
 }
 
 /**
@@ -195,11 +169,11 @@ int uadk_sha384_init(struct ifm_sha384_ctx *ctx)
  * @ingroup uadk_sha384_update
  * @par 将uadk的sha384算法适配成sha384_update算法，该接口的使用场景以及参数同nettle中的sha384_update接口相同
  */
-void uadk_sha384_update(struct ifm_sha384_ctx *ctx,
-                        size_t length,
-                        const uint8_t *data)
+int uadk_sha384_update(struct ifm_sha384_ctx *ctx,
+                       size_t length,
+                       const uint8_t *data)
 {
-    uadk_ctx_update(&(ctx->uadk_ctx), length, data, SHA384_DIGEST_SIZE);
+    return uadk_ctx_update(&(ctx->uadk_ctx), length, data, SHA384_DIGEST_SIZE);
 }
 
 /**
@@ -226,11 +200,11 @@ int uadk_sha512_init(struct ifm_sha512_ctx *ctx)
  * @ingroup uadk_sha512_update
  * @par 将uadk的sha512算法适配成sha512_update算法，该接口的使用场景以及参数同nettle中的sha512_update接口相同
  */
-void uadk_sha512_update(struct ifm_sha512_ctx *ctx,
-                        size_t length,
-                        const uint8_t *data)
+int uadk_sha512_update(struct ifm_sha512_ctx *ctx,
+                       size_t length,
+                       const uint8_t *data)
 {
-   uadk_ctx_update(&(ctx->uadk_ctx), length, data, SHA512_DIGEST_SIZE);
+   return uadk_ctx_update(&(ctx->uadk_ctx), length, data, SHA512_DIGEST_SIZE);
 }
 
 /**
@@ -257,11 +231,11 @@ int uadk_sha512_224_init(struct ifm_sha512_224_ctx *ctx)
  * @ingroup uadk_sha512_224_update
  * @par 将uadk的sha512_224算法适配成sha512_224_update算法，该接口的使用场景以及参数同nettle中的sha512_224_update接口相同
  */
-void uadk_sha512_224_update(struct ifm_sha512_224_ctx *ctx,
-                            size_t length,
-                            const uint8_t *data)
+int uadk_sha512_224_update(struct ifm_sha512_224_ctx *ctx,
+                           size_t length,
+                           const uint8_t *data)
 {
-    uadk_ctx_update(&(ctx->uadk_ctx), length, data, SHA512_224_DIGEST_SIZE);
+    return uadk_ctx_update(&(ctx->uadk_ctx), length, data, SHA512_224_DIGEST_SIZE);
 }
 
 /**
@@ -288,11 +262,11 @@ int uadk_sha512_256_init(struct ifm_sha512_256_ctx *ctx)
  * @ingroup uadk_sha512_256_update
  * @par 将uadk的sha512_256算法适配成sha512_256_update算法，该接口的使用场景以及参数同nettle中的sha512_256_update接口相同
  */
-void uadk_sha512_256_update(struct ifm_sha512_256_ctx *ctx,
-                            size_t length,
-                            const uint8_t *data)
+int uadk_sha512_256_update(struct ifm_sha512_256_ctx *ctx,
+                           size_t length,
+                           const uint8_t *data)
 {
-    uadk_ctx_update(&(ctx->uadk_ctx), length, data, SHA512_256_DIGEST_SIZE);
+    return uadk_ctx_update(&(ctx->uadk_ctx), length, data, SHA512_256_DIGEST_SIZE);
 }
 
 /**
@@ -330,7 +304,11 @@ void ifm_sha256_update(struct ifm_sha256_ctx *ctx,
 #ifdef __aarch64__
     // UADK不支持处理长度为0的字符串
     if (ctx->use_uadk && length >0) {
-        uadk_sha256_update(ctx, length, data);
+        if (uadk_sha256_update(ctx, length, data) != 0) {
+            sha256_update((struct sha256_ctx *)ctx, length, data);
+            ctx->use_uadk = false;
+            return;
+        }
     } else {
         sha256_update((struct sha256_ctx *)ctx, length, data);
         ctx->use_uadk = false;
@@ -373,7 +351,11 @@ void ifm_sha224_update(struct ifm_sha224_ctx *ctx, size_t length, const uint8_t 
 #ifdef __aarch64__
     // UADK不支持处理长度为0的字符串
     if (ctx->use_uadk && length > 0) {
-        uadk_sha224_update(ctx, length, data);
+        if (uadk_sha224_update(ctx, length, data) != 0) {
+            sha224_update((struct sha224_ctx *)ctx, length, data);
+            ctx->use_uadk = false;
+            return;
+        }
     } else {
         sha224_update((struct sha224_ctx *)ctx, length, data);
         ctx->use_uadk = false;
@@ -416,7 +398,11 @@ void ifm_sha512_update(struct ifm_sha512_ctx *ctx, size_t length, const uint8_t 
 #ifdef __aarch64__
     // UADK不支持处理长度为0的字符串
     if (ctx->use_uadk && length > 0) {
-        uadk_sha512_update(ctx, length, data);
+        if (uadk_sha512_update(ctx, length, data) != 0) {
+            sha512_update((struct sha512_ctx *)ctx, length, data);
+            ctx->use_uadk = false;
+            return;
+        }
     } else {
         sha512_update((struct sha512_ctx *)ctx, length, data);
         ctx->use_uadk = false;
@@ -460,7 +446,11 @@ void ifm_sha384_update(struct ifm_sha384_ctx *ctx, size_t length, const uint8_t 
 #ifdef __aarch64__
     // UADK不支持处理长度为0的字符串
     if (ctx->use_uadk && length > 0) {
-        uadk_sha384_update(ctx, length, data);
+        if (uadk_sha384_update(ctx, length, data) != 0) {
+            sha384_update((struct sha384_ctx *)ctx, length, data);
+            ctx->use_uadk = false;
+            return;
+        }
     } else {
         sha384_update((struct sha384_ctx *)ctx, length, data);
         ctx->use_uadk = false;
@@ -504,7 +494,11 @@ void ifm_sha512_224_update(struct ifm_sha512_224_ctx *ctx, size_t length, const 
 #ifdef __aarch64__
     // UADK不支持处理长度为0的字符串
     if (ctx->use_uadk && length >0) {
-        uadk_sha512_224_update(ctx, length, data);
+        if (uadk_sha512_224_update(ctx, length, data) != 0) {
+            sha512_224_update((struct sha512_224_ctx *)ctx, length, data);
+            ctx->use_uadk = false;
+            return;
+        }
     } else {
         sha512_224_update((struct sha512_224_ctx *)ctx, length, data);
         ctx->use_uadk = false;
@@ -547,7 +541,11 @@ void ifm_sha512_256_update(struct ifm_sha512_256_ctx *ctx, size_t length, const 
 #ifdef __aarch64__
     // UADK不支持处理长度为0的字符串
     if (ctx->use_uadk && length >0) {
-        uadk_sha512_256_update(ctx, length, data);
+        if (uadk_sha512_256_update(ctx, length, data) != 0) {
+            sha512_256_update((struct sha512_256_ctx *)ctx, length, data);
+            ctx->use_uadk = false;
+            return;
+        }
     } else {
         sha512_256_update((struct sha512_256_ctx *)ctx, length, data);
         ctx->use_uadk = false;

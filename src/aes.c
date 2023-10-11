@@ -30,11 +30,11 @@
 #ifdef __aarch64__
 #include <string.h>
 #include "uadk_meta.h"
-#include "ifm_utils.h"
 #endif
 
 #include "nettle/aes.h"
 #include "aes_meta.h"
+#include "ifm_utils.h"
 
 #ifdef __aarch64__
 
@@ -44,75 +44,12 @@
  */
 void free_cipher_uadk(struct uadk_cipher_st *uadk_ctx)
 {
-    if (uadk_ctx->opdata.in) {
-        wd_free_blk(uadk_ctx->pool, uadk_ctx->opdata.in);
-        uadk_ctx->opdata.in = NULL;
-    }
-    if (uadk_ctx->opdata.iv) {
-        wd_free_blk(uadk_ctx->pool, uadk_ctx->opdata.iv);
-        uadk_ctx->opdata.iv = NULL;
-    }
-    if (uadk_ctx->opdata.out) {
-        wd_free_blk(uadk_ctx->pool, uadk_ctx->opdata.out);
-        uadk_ctx->opdata.out = NULL;
-    }
-    if (uadk_ctx->ctx) {
-        wcrypto_del_cipher_ctx(uadk_ctx->ctx);
-        uadk_ctx->ctx = NULL;
-    }
-}
-
-/**
- * @ingroup alloc_uadk
- * @par 申请uadk_ctx的资源信息
- */
-int alloc_uadk(struct uadk_cipher_st *uadk_ctx, bool force)
-{
-    struct wcrypto_cipher_ctx_setup ctx_setup;
-
-    if (force || uadk_ctx->ctx == NULL) {
-        memset(&ctx_setup, 0, sizeof(ctx_setup));
-        ctx_setup.cb = NULL;
-        ctx_setup.alg = WCRYPTO_CIPHER_AES;
-        ctx_setup.mode = uadk_ctx->mode;
-        ctx_setup.br.alloc = (void *)wd_alloc_blk;
-        ctx_setup.br.free = (void *)wd_free_blk;
-        ctx_setup.br.iova_map = (void *)wd_blk_iova_map;
-        ctx_setup.br.iova_unmap = (void *)wd_blk_iova_unmap;
-        ctx_setup.br.get_bufsize = (void *)wd_blksize;
-        ctx_setup.br.usr = uadk_ctx->pool;
-        uadk_ctx->ctx = wcrypto_create_cipher_ctx(uadk_ctx->q, &ctx_setup);
-        if (uadk_ctx->ctx == NULL) {
-            return -1;
-        }
-        memset(&(uadk_ctx->opdata), 0, sizeof(uadk_ctx->opdata));
-    }
-    if (uadk_ctx->opdata.in == NULL) {
-        uadk_ctx->opdata.in = wd_alloc_blk(uadk_ctx->pool);
-        if (uadk_ctx->opdata.in == NULL) {
-            // 失败时释放资源
-            free_cipher_uadk(uadk_ctx);
-            return -1;
-        }
-    }
-    if (uadk_ctx->opdata.out == NULL) {
-        uadk_ctx->opdata.out = wd_alloc_blk(uadk_ctx->pool);
-        if (uadk_ctx->opdata.out == NULL) {
-            // 失败时释放资源
-            free_cipher_uadk(uadk_ctx);
-            return -1;
-        }
-    }
-    if (uadk_ctx->mode == WCRYPTO_CIPHER_CBC && uadk_ctx->opdata.iv == NULL) {
-        uadk_ctx->opdata.iv = wd_alloc_blk(uadk_ctx->pool);
-        if (uadk_ctx->opdata.iv == NULL) {
-            // 失败时释放资源
-            free_cipher_uadk(uadk_ctx);
-            return -1;
-        }
-    }
-
-    return 0;
+    free_uadk_opdata(IFM_UADK_ALG_CIPHER, uadk_ctx->p_share_opdata);
+    free_uadk_ctx(IFM_UADK_ALG_CIPHER, uadk_ctx->p_share_ctx);
+    uadk_ctx->ctx = NULL;
+    uadk_ctx->p_share_ctx = NULL;
+    uadk_ctx->p_share_opdata = NULL;
+    uadk_ctx->set_key = false;
 }
 
 /**
@@ -121,43 +58,15 @@ int alloc_uadk(struct uadk_cipher_st *uadk_ctx, bool force)
  */
 int uadk_aes_init(struct uadk_cipher_st *uadk_ctx)
 {
-    static struct wd_queue q;
-    static void *pool = NULL;
-    static bool initialized = false;
-    struct wd_blkpool_setup pool_setup;
-    int ret = 0;
+    IFMUadkShareCtx *p_share_ctx = NULL;
 
-    if (initialized == false) {
-        memset(&q, 0, sizeof(q));
-        q.capa.alg = "cipher";
-        ret = wd_request_queue(&q);
-        if (ret != 0) {
-            return ret;
-        }
-
-        memset(&pool_setup, 0, sizeof(pool_setup));
-        pool_setup.block_size = AES_MAX_BLOCK_SZ;
-        pool_setup.block_num = MAX_BLOCK_NM;
-        pool_setup.align_size = SQE_SIZE;
-        pool = wd_blkpool_create(&q, &pool_setup);
-        if (pool == NULL) {
-            // 在 wd_blkpool_create 失败时释放资源
-            wd_release_queue(&q);
-            return -1;
-        }
-
-        initialized = true;
-    }
-
-    if (uadk_ctx == NULL) {
+    p_share_ctx = get_uadk_ctx(IFM_UADK_ALG_CIPHER, WCRYPTO_CIPHER_AES, uadk_ctx->mode, false);
+    if (p_share_ctx == NULL) {
+        IFM_ERR("uadk_aes_init get_uadk_ctx failed\n");
         return -1;
     }
-
-    uadk_ctx->q = &q;
-    uadk_ctx->pool = pool;
-    if (0 != alloc_uadk(uadk_ctx, true)) {
-        return -1;
-    }
+    uadk_ctx->ctx = p_share_ctx->ctx;
+    uadk_ctx->p_share_ctx = p_share_ctx;
 
     return 0;
 }
@@ -204,24 +113,32 @@ void uadk_aes_do_cipher(struct uadk_cipher_st *uadk_ctx,
         return;
     }
 
-    alloc_uadk(uadk_ctx, false);
+    uadk_aes_init(uadk_ctx);
+
+    uadk_ctx->p_share_opdata = get_uadk_opdata(WCRYPTO_CIPHER_AES);
+    if (uadk_ctx->p_share_opdata == NULL) {
+        IFM_ERR("uadk_aes_do_cipher get_uadk_opdata failed\n");
+        memset(dst, 0, length);
+        return;
+    }
+    uadk_ctx->p_opdata = (struct wcrypto_cipher_op_data *)(uadk_ctx->p_share_opdata->opdata);
 
     if (encrypt) {
-        uadk_ctx->opdata.op_type = WCRYPTO_CIPHER_ENCRYPTION;
+        uadk_ctx->p_opdata->op_type = WCRYPTO_CIPHER_ENCRYPTION;
     } else {
-        uadk_ctx->opdata.op_type = WCRYPTO_CIPHER_DECRYPTION;
+        uadk_ctx->p_opdata->op_type = WCRYPTO_CIPHER_DECRYPTION;
     }
 
     // 由于当前UADK v1接口不支持cipher的分段，因此最大只能一次性处理AES_MAX_BLOCK_SZ大小的数据
-    uadk_ctx->opdata.in_bytes = uadk_ctx->opdata.out_bytes = length;
-    memcpy(uadk_ctx->opdata.in, src, uadk_ctx->opdata.in_bytes);
-    memset(uadk_ctx->opdata.out, 0, uadk_ctx->opdata.out_bytes);
+    uadk_ctx->p_opdata->in_bytes = uadk_ctx->p_opdata->out_bytes = length;
+    memcpy(uadk_ctx->p_opdata->in, src, uadk_ctx->p_opdata->in_bytes);
+    memset(uadk_ctx->p_opdata->out, 0, uadk_ctx->p_opdata->out_bytes);
     // 加密解密模式为CBC的时候，iiv不能为空
     if (NULL != iiv) {
-        memcpy(uadk_ctx->opdata.iv, iiv, AES128_KEY_SIZE);
-        uadk_ctx->opdata.iv_bytes = AES128_KEY_SIZE;
+        memcpy(uadk_ctx->p_opdata->iv, iiv, AES128_KEY_SIZE);
+        uadk_ctx->p_opdata->iv_bytes = AES128_KEY_SIZE;
     }
-    if (0 != wcrypto_do_cipher(uadk_ctx->ctx, &(uadk_ctx->opdata), NULL)) {
+    if (0 != wcrypto_do_cipher(uadk_ctx->ctx, uadk_ctx->p_opdata, NULL)) {
         // 加密失败的情况下，将dst设置为0
         if (dst != NULL) {
             memset(dst, 0, length);
@@ -230,7 +147,7 @@ void uadk_aes_do_cipher(struct uadk_cipher_st *uadk_ctx,
         return;
     }
 
-    memcpy(dst, uadk_ctx->opdata.out, uadk_ctx->opdata.out_bytes);
+    memcpy(dst, uadk_ctx->p_opdata->out, uadk_ctx->p_opdata->out_bytes);
 
     free_cipher_uadk(uadk_ctx);
 }
@@ -297,6 +214,7 @@ void ifm_aes128_encrypt(struct ifm_aes128_ctx *ctx, size_t length, uint8_t *dst,
             ctx->uadk_ctx.mode = WCRYPTO_CIPHER_ECB;
             ret = uadk_aes_set_key(&(ctx->uadk_ctx), ctx->uadk_key, AES128_KEY_SIZE);
             if (ret != 0) {
+                IFM_ERR("ifm_aes128_encrypt set key failed.");
                 ctx->use_uadk = false;
                 aes128_encrypt((const struct aes128_ctx *)ctx, length, dst, src);
                 return;
@@ -304,6 +222,7 @@ void ifm_aes128_encrypt(struct ifm_aes128_ctx *ctx, size_t length, uint8_t *dst,
         }
         uadk_aes_do_cipher((struct uadk_cipher_st *)&(ctx->uadk_ctx), NULL, dst, src, length, true);
     } else {
+        memset(dst, 0, length);
         aes128_encrypt((const struct aes128_ctx *)ctx, length, dst, src);
     }
 #else
@@ -326,6 +245,7 @@ void ifm_aes128_decrypt(struct ifm_aes128_ctx *ctx, size_t length, uint8_t *dst,
             ctx->uadk_ctx.mode = WCRYPTO_CIPHER_ECB;
             ret = uadk_aes_set_key(&(ctx->uadk_ctx), ctx->uadk_key, AES128_KEY_SIZE);
             if (ret != 0) {
+                IFM_ERR("ifm_aes128_decrypt set key failed.");
                 ctx->use_uadk = false;
                 aes128_decrypt((const struct aes128_ctx *)ctx, length, dst, src);
                 return;
@@ -401,6 +321,7 @@ void ifm_aes192_encrypt(struct ifm_aes192_ctx *ctx, size_t length, uint8_t *dst,
             ctx->uadk_ctx.mode = WCRYPTO_CIPHER_ECB;
             ret = uadk_aes_set_key(&(ctx->uadk_ctx), ctx->uadk_key, AES192_KEY_SIZE);
             if (ret != 0) {
+                IFM_ERR("ifm_aes192_encrypt set key failed.");
                 ctx->use_uadk = false;
                 aes192_encrypt((const struct aes192_ctx *)ctx, length, dst, src);
                 return;
@@ -428,6 +349,7 @@ void ifm_aes192_decrypt(struct ifm_aes192_ctx *ctx, size_t length, uint8_t *dst,
             ctx->uadk_ctx.mode = WCRYPTO_CIPHER_ECB;
             ret = uadk_aes_set_key(&(ctx->uadk_ctx), ctx->uadk_key, AES192_KEY_SIZE);
             if (ret != 0) {
+                IFM_ERR("ifm_aes192_decrypt set key failed.");
                 ctx->use_uadk = false;
                 aes192_decrypt((const struct aes192_ctx *)ctx, length, dst, src);
                 return;
@@ -503,6 +425,7 @@ void ifm_aes256_encrypt(struct ifm_aes256_ctx *ctx, size_t length, uint8_t *dst,
             ctx->uadk_ctx.mode = WCRYPTO_CIPHER_ECB;
             ret = uadk_aes_set_key(&(ctx->uadk_ctx), ctx->uadk_key, AES256_KEY_SIZE);
             if (ret != 0) {
+                IFM_ERR("ifm_aes256_encrypt set key failed.");
                 ctx->use_uadk = false;
                 aes256_encrypt((const struct aes256_ctx *)ctx, length, dst, src);
                 return;
@@ -530,6 +453,7 @@ void ifm_aes256_decrypt(struct ifm_aes256_ctx *ctx, size_t length, uint8_t *dst,
             ctx->uadk_ctx.mode = WCRYPTO_CIPHER_ECB;
             ret = uadk_aes_set_key(&(ctx->uadk_ctx), ctx->uadk_key, AES256_KEY_SIZE);
             if (ret != 0) {
+                IFM_ERR("ifm_aes256_decrypt set key failed.");
                 ctx->use_uadk = false;
                 aes256_decrypt((const struct aes256_ctx *)ctx, length, dst, src);
                 return;
@@ -544,9 +468,9 @@ void ifm_aes256_decrypt(struct ifm_aes256_ctx *ctx, size_t length, uint8_t *dst,
 #endif
 }
 
-void ifm_aes_set_encrypt_key(struct ifm_aes_ctx *ctx, size_t key_size, const uint8_t *key)
+void ifm_aes_set_encrypt_key(struct ifm_aes_ctx *ctx, size_t keySize, const uint8_t *key)
 {
-    switch (key_size) {
+    switch (keySize) {
         case AES128_KEY_SIZE:
             ifm_aes128_set_encrypt_key(&ctx->u.ctx128, key);
             break;
@@ -560,12 +484,12 @@ void ifm_aes_set_encrypt_key(struct ifm_aes_ctx *ctx, size_t key_size, const uin
             return;
     }
 
-    ctx->key_size = key_size;
+    ctx->key_size = keySize;
 }
 
-void ifm_aes_set_decrypt_key(struct ifm_aes_ctx *ctx, size_t key_size, const uint8_t *key)
+void ifm_aes_set_decrypt_key(struct ifm_aes_ctx *ctx, size_t keySize, const uint8_t *key)
 {
-    switch (key_size) {
+    switch (keySize) {
         case AES128_KEY_SIZE:
             ifm_aes128_set_decrypt_key(&ctx->u.ctx128, key);
             break;
@@ -579,7 +503,7 @@ void ifm_aes_set_decrypt_key(struct ifm_aes_ctx *ctx, size_t key_size, const uin
             return;
     }
 
-    ctx->key_size = key_size;
+    ctx->key_size = keySize;
 }
 
 void ifm_aes_invert_key(struct ifm_aes_ctx *dst, const struct ifm_aes_ctx *src)

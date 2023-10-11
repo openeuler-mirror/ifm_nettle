@@ -37,45 +37,17 @@
  */
 int uadk_md5_init(struct ifm_md5_ctx *ctx)
 {
-    static struct wd_queue q;
-    static struct wd_blkpool_setup pool_setup;
-    static void *pool = NULL;
-    static bool q_init = false;
-    int ret = 0;
-    if (!q_init)
-    {
-        memset(&q, 0, sizeof(q));
-        q.capa.alg = "digest";
-        ret = wd_request_queue(&q);
-        if (ret)
-        {
-            return ret;
-        }
+    IFMUadkShareCtx *p_share_ctx = NULL;
 
-        memset(&pool_setup, 0, sizeof(pool_setup));
-        pool_setup.block_size = MAX_BLOCK_SZ; //set pool  inv + key + in + out
-        pool_setup.block_num = MAX_BLOCK_NM;
-        pool_setup.align_size = SQE_SIZE;
-        pool = wd_blkpool_create(&q, &pool_setup);
-
-        q_init = true;
+    memset(&(ctx->uadk_ctx), 0, sizeof(ctx->uadk_ctx));
+    p_share_ctx = get_uadk_ctx(IFM_UADK_ALG_DIGEST, WCRYPTO_MD5, WCRYPTO_DIGEST_NORMAL, true);
+    if (p_share_ctx == NULL) {
+        IFM_ERR("uadk_md5_init get_uadk_ctx failed\n");
+        return -1;
     }
-    ctx->uadk_ctx.pool = pool;
+    ctx->uadk_ctx.ctx = p_share_ctx->ctx;
 
-    ctx->uadk_ctx.setup.alg = WCRYPTO_MD5;
-    ctx->uadk_ctx.setup.mode = WCRYPTO_DIGEST_NORMAL;
-    ctx->uadk_ctx.setup.br.alloc = (void *)wd_alloc_blk;
-    ctx->uadk_ctx.setup.br.free = (void *)wd_free_blk;
-    ctx->uadk_ctx.setup.br.iova_map = (void *)wd_blk_iova_map;
-    ctx->uadk_ctx.setup.br.iova_unmap = (void *)wd_blk_iova_unmap;
-    ctx->uadk_ctx.setup.br.get_bufsize = (void *)wd_blksize;
-    ctx->uadk_ctx.setup.br.usr = pool;
-
-    ctx->uadk_ctx.pq = &q;
-    ctx->uadk_ctx.ctx = wcrypto_create_digest_ctx(&q, &(ctx->uadk_ctx.setup));
-    memset(&(ctx->uadk_ctx.opdata), 0, sizeof(struct wcrypto_digest_op_data));
-
-    return ret;
+    return 0;
 }
 
 /**
@@ -84,27 +56,28 @@ int uadk_md5_init(struct ifm_md5_ctx *ctx)
  * 在原有的nettle对应的update接口中，会将数据提前进行压缩计算，因此只要64字节即可满足要求。
  * 但是UADK中没有对应的update接口，因此在update接口中不适合将所有的数据都存储起来。
  */
-void uadk_md5_update(struct ifm_md5_ctx *ctx,
-                     size_t length,
-                     const uint8_t *data)
+int uadk_md5_update(struct ifm_md5_ctx *ctx,
+                    size_t length,
+                    const uint8_t *data)
 {
     const uint8_t *data_pt = NULL;
     size_t total_len = 0;
 
-    if (NULL == ctx->uadk_ctx.ctx)
-    {
-        ctx->uadk_ctx.ctx = wcrypto_create_digest_ctx(ctx->uadk_ctx.pq, &(ctx->uadk_ctx.setup));
+    if (NULL == ctx->uadk_ctx.ctx) {
+        if (uadk_md5_init(ctx) != 0) {
+            return -1;
+        }
     }
 
     // 接口的使用场景上，会存在多次update然后再digest的情况，因此需考虑无需重复申请的场景
-    if (!ctx->uadk_ctx.opdata.in)
-    {
-        ctx->uadk_ctx.opdata.in = wd_alloc_blk(ctx->uadk_ctx.pool);
-    }
-    if (!ctx->uadk_ctx.opdata.out)
-    {
-        ctx->uadk_ctx.opdata.out = wd_alloc_blk(ctx->uadk_ctx.pool);
-        ctx->uadk_ctx.opdata.out_bytes = MD5_DIGEST_SIZE; // MD5的长度是16
+    if (!ctx->uadk_ctx.p_share_opdata) {
+        ctx->uadk_ctx.p_share_opdata = get_uadk_opdata(IFM_UADK_ALG_DIGEST);
+        if (!ctx->uadk_ctx.p_share_opdata) {
+            IFM_ERR("uadk_md5_update: get_uadk_opdata failed\n");
+            return -1;
+        }
+        ctx->uadk_ctx.p_opdata = (struct wcrypto_digest_op_data *)(ctx->uadk_ctx.p_share_opdata->opdata);
+        ctx->uadk_ctx.p_opdata->out_bytes = MD5_DIGEST_SIZE;         // MD5的长度是16
     }
 
     do
@@ -113,20 +86,25 @@ void uadk_md5_update(struct ifm_md5_ctx *ctx,
         // 分段输入，每段大小为MAX_BLOCK_SZ
         if (total_len + MAX_BLOCK_SZ <= length)
         {
-            memcpy(ctx->uadk_ctx.opdata.in, data_pt, MAX_BLOCK_SZ);
-            ctx->uadk_ctx.opdata.in_bytes = MAX_BLOCK_SZ;
-            ctx->uadk_ctx.opdata.has_next = true;
+            memcpy(ctx->uadk_ctx.p_opdata->in, data_pt, MAX_BLOCK_SZ);
+            ctx->uadk_ctx.p_opdata->in_bytes = MAX_BLOCK_SZ;
+            ctx->uadk_ctx.p_opdata->has_next = true;
             total_len += MAX_BLOCK_SZ;
         }
         else
         {
-            memcpy(ctx->uadk_ctx.opdata.in, data_pt, length - total_len);
-            ctx->uadk_ctx.opdata.in_bytes = length - total_len;
-            ctx->uadk_ctx.opdata.has_next = false;
+            memcpy(ctx->uadk_ctx.p_opdata->in, data_pt, length - total_len);
+            ctx->uadk_ctx.p_opdata->in_bytes = length - total_len;
+            ctx->uadk_ctx.p_opdata->has_next = false;
             total_len = length;
         }
-        wcrypto_do_digest(ctx->uadk_ctx.ctx, &(ctx->uadk_ctx.opdata), NULL);
+        if (wcrypto_do_digest(ctx->uadk_ctx.ctx, ctx->uadk_ctx.p_opdata, NULL) != 0) {
+            IFM_ERR("uadk_md5_update: wcrypto_do_digest failed\n");
+            return -1;
+        }
     } while (total_len < length);
+
+    return 0;
 }
 
 /**
@@ -137,23 +115,9 @@ void uadk_md5_digest(struct ifm_md5_ctx *ctx,
                      size_t length,
                      uint8_t *digest)
 {
-    memcpy(digest, ctx->uadk_ctx.opdata.out, length);
+    memcpy(digest, ctx->uadk_ctx.p_opdata->out, length);
 
-    if (ctx->uadk_ctx.opdata.in)
-    {
-        wd_free_blk(ctx->uadk_ctx.pool, ctx->uadk_ctx.opdata.in);
-        ctx->uadk_ctx.opdata.in = NULL;
-    }
-    if (ctx->uadk_ctx.opdata.out)
-    {
-        wd_free_blk(ctx->uadk_ctx.pool, ctx->uadk_ctx.opdata.out);
-        ctx->uadk_ctx.opdata.out = NULL;
-    }
-    if (ctx->uadk_ctx.ctx)
-    {
-        wcrypto_del_digest_ctx(ctx->uadk_ctx.ctx);
-        ctx->uadk_ctx.ctx = NULL;
-    }
+    free_uadk_opdata(IFM_UADK_ALG_DIGEST, ctx->uadk_ctx.p_share_opdata);
 
     // 参照nettle原有实现逻辑，重新进行init初始化，为下一次的update做准备
     uadk_md5_init(ctx);
@@ -187,7 +151,11 @@ void ifm_md5_update(struct ifm_md5_ctx *ctx,
     // UADK不支持处理长度为0的字符串
     if (ctx->use_uadk && length > 0)
     {
-        uadk_md5_update(ctx, length, data);
+        if (uadk_md5_update(ctx, length, data) != 0) {
+            md5_update((struct md5_ctx *)ctx, length, data);
+            ctx->use_uadk = false;
+            return;
+        }
     }
     else
     {
