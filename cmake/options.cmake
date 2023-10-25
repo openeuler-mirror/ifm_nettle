@@ -26,4 +26,11 @@ if (ENABLE_LIBIFM_LIBXCRYPT STREQUAL "ON")
     message("${Green}--  Enable libifm_libxcrypt${ColourReset}")
 endif()
 
+option(ENABLE_LIBIFM_LIBVERTO "enable ifm_libverto libifm_libverto option" ON)
+if (ENABLE_LIBIFM_LIBVERTO STREQUAL "ON")
+    add_definitions(-DENABLE_LIBIFM_LIBVERTO=1)
+    set(ENABLE_LIBIFM_LIBVERTO 1)
+    message("${Green}--  Enable libifm_libverto${ColourReset}")
+endif()
+
 message("${BoldGreen}---- Selected options end ----${ColourReset}")

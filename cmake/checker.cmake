@@ -63,6 +63,12 @@ find_library(LIBWD_LIBRARY wd
 _CHECK(LIBWD_LIBRARY "LIBWD_LIBRARY-NOTFOUND" "libwd.so")
 endif()
 
+if (ENABLE_LIBIFM_LIBVERTO)
+find_library(LIBHV_LIBRARY hv
+	HINTS ${PC_LIBHV_LIBDIR} ${PC_LIBHV_LIBRARY_DIRS})
+_CHECK(LIBHV_LIBRARY "LIBHV_LIBRARY-NOTFOUND" "libhv.so")
+endif()
+
 if (ENABLE_UT)
     pkg_check_modules(PC_GTEST "gtest")
     find_path(GTEST_INCLUDE_DIR gtest/gtest.h

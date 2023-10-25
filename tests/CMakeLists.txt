@@ -37,6 +37,7 @@ macro(_DEFINE_NEW_TEST)
         libifm_nettle
         libifm_libgcrypt
         libifm_libxcrypt
+        libifm_libverto
         gpg-error
         gmp
         )
@@ -49,6 +50,7 @@ macro(_DEFINE_NEW_TEST)
         PUBLIC ${CMAKE_SOURCE_DIR}/src
         PUBLIC ${CMAKE_SOURCE_DIR}/src/gcrypt
         PUBLIC ${CMAKE_SOURCE_DIR}/src/xcrypt
+        PUBLIC ${CMAKE_SOURCE_DIR}/src/verto
         )
         
     add_test(
@@ -86,7 +88,7 @@ _DEFINE_NEW_TEST(gcrypt_basic_ut gcrypt_basic_testcases)
 _DEFINE_NEW_TEST(xcrypt_basic_ut xcrypt_basic_testcases)
 _DEFINE_NEW_TEST(hmac_ut hmac_testcases)
 _DEFINE_NEW_TEST(gcrypt_basic_cipher_ut gcrypt_basic_cipher_testcases)
-
+_DEFINE_NEW_TEST(verto_ut verto_testcases)
 
 
 # mock test for run lcov to generate html
