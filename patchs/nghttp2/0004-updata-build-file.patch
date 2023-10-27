@@ -1,0 +1,213 @@
+From dd85ebd9c84df155190fb7ec4b0e2ee922c5354d Mon Sep 17 00:00:00 2001
+From: dengjie <1171276417@qq.com>
+Date: Fri, 27 Oct 2023 00:09:20 +0800
+Subject: [PATCH 4/4] updata build file
+
+---
+ configure.ac    | 43 +++++++++++++++++++++++++++++++++++++++++++
+ src/Makefile.am | 48 +++++++++++++++++++++++++++++++++++++++++++++++-
+ 2 files changed, 90 insertions(+), 1 deletion(-)
+
+diff --git a/configure.ac b/configure.ac
+index 5163b03..6487455 100644
+--- a/configure.ac
++++ b/configure.ac
+@@ -102,6 +102,12 @@ AC_ARG_ENABLE([http3],
+                     [(EXPERIMENTAL) Enable HTTP/3.  This requires ngtcp2, nghttp3, and a custom OpenSSL.])],
+     [request_http3=$enableval], [request_http3=no])
+ 
++AC_ARG_ENABLE([libverto],
++    [AS_HELP_STRING([--enable-libverto],
++		    [Enable libverto.])],
++    [request_libverto=$enableval], [request_libverto=no])
++
++
+ AC_ARG_WITH([libxml2],
+     [AS_HELP_STRING([--with-libxml2],
+                     [Use libxml2 [default=check]])],
+@@ -177,10 +183,19 @@ AC_ARG_WITH([libbpf],
+                     [Use libbpf [default=no]])],
+     [request_libbpf=$withval], [request_libbpf=no])
+ 
++AC_ARG_WITH([libverto],
++    [AS_HELP_STRING([--with-libverto],
++		    [Use libverto [default=no]])],
++    [request_libverto=$withval], [request_libverto=no])
++
++
+ dnl Define variables
+ AC_ARG_VAR([LIBEV_CFLAGS], [C compiler flags for libev, skipping any checks])
+ AC_ARG_VAR([LIBEV_LIBS], [linker flags for libev, skipping any checks])
+ 
++AC_ARG_VAR([LIBVERTO_CFLAGS], [C compiler flags for libverto, skipping any checks])
++AC_ARG_VAR([LIBVERTO_LIBS], [linker flags for libverto, skipping any checks])
++
+ AC_ARG_VAR([JEMALLOC_CFLAGS],
+            [C compiler flags for jemalloc, skipping any checks])
+ AC_ARG_VAR([JEMALLOC_LIBS], [linker flags for jemalloc, skipping any checks])
+@@ -208,6 +223,7 @@ if [test "x$request_lib_only" = "xyes"]; then
+   request_hpack_tools=no
+   request_examples=no
+   request_http3=no
++  request_libverto=no
+   request_libxml2=no
+   request_jansson=no
+   request_zlib=no
+@@ -444,6 +460,19 @@ if test "x${request_libev}" = "xyes" &&
+   AC_MSG_ERROR([libev was requested (--with-libev) but not found])
+ fi
+ 
++# libverto (for src)
++have_libverto=no
++if test "x${request_libverto}" != "xno"; then
++   have_libverto=yes
++   LIBVERTO_LIBS=-lverto
++   LIBVERTO_CFLAGS=
++  if test "x${have_libverto}" = "xyes"; then
++    AC_DEFINE([HAVE_LIBVERTO], [1], [Define to 1 if you have `libverto` library.])
++  fi
++
++fi
++
++
+ # openssl (for src)
+ have_openssl=no
+ if test "x${request_openssl}" != "xno"; then
+@@ -770,6 +799,17 @@ fi
+ AM_CONDITIONAL([ENABLE_HTTP3], [ test "x${enable_http3}" = "xyes" ])
+ 
+ enable_hpack_tools=no
++
++#Check libverto support
++enable_libverto=no
++if test "x${request_libverto}" != "xno"; then
++  enable_libverto=yes
++  AC_DEFINE([ENABLE_LIBVERTO], [1], [Define to 1 if libverto is enable.])
++fi
++
++AM_CONDITIONAL([ENABLE_LIBVERTO], [ test "x${enable_libverto}" = "xyes" ])
++
++
+ # HPACK tools requires jansson
+ if test "x${request_hpack_tools}" != "xno" &&
+    test "x${have_jansson}" = "xyes"; then
+@@ -1142,6 +1182,7 @@ AC_MSG_NOTICE([summary of build options:
+       OpenSSL:        ${have_openssl} (CFLAGS='${OPENSSL_CFLAGS}' LIBS='${OPENSSL_LIBS}')
+       Libxml2:        ${have_libxml2} (CFLAGS='${LIBXML2_CFLAGS}' LIBS='${LIBXML2_LIBS}')
+       Libev:          ${have_libev} (CFLAGS='${LIBEV_CFLAGS}' LIBS='${LIBEV_LIBS}')
++      Libverto:       ${have_libverto} (CFLAGS='${LIBVERTO_CFLAGS}' LIBS='${LIBVERTO_LIBS}')
+       Libc-ares:      ${have_libcares} (CFLAGS='${LIBCARES_CFLAGS}' LIBS='${LIBCARES_LIBS}')
+       libngtcp2:      ${have_libngtcp2} (CFLAGS='${LIBNGTCP2_CFLAGS}' LIBS='${LIBNGTCP2_LIBS}')
+       libngtcp2_crypto_quictls: ${have_libngtcp2_crypto_quictls} (CFLAGS='${LIBNGTCP2_CRYPTO_QUICTLS_CFLAGS}' LIBS='${LIBNGTCP2_CRYPTO_QUICTLS_LIBS}')
+@@ -1163,4 +1204,6 @@ AC_MSG_NOTICE([summary of build options:
+       Examples:       ${enable_examples}
+       Threading:      ${enable_threads}
+       HTTP/3 (EXPERIMENTAL): ${enable_http3}
++      Enable_libverto:	${enable_libverto}
++
+ ])
+diff --git a/src/Makefile.am b/src/Makefile.am
+index f112ac2..a49c09f 100644
+--- a/src/Makefile.am
++++ b/src/Makefile.am
+@@ -44,6 +44,7 @@ AM_CPPFLAGS = \
+ 	@JEMALLOC_CFLAGS@ \
+ 	@LIBXML2_CFLAGS@ \
+ 	@LIBEV_CFLAGS@ \
++	@LIBVERTO_CFLAGS@ \
+ 	@LIBNGHTTP3_CFLAGS@ \
+ 	@LIBNGTCP2_CRYPTO_QUICTLS_CFLAGS@ \
+ 	@LIBNGTCP2_CRYPTO_BORINGSSL_CFLAGS@ \
+@@ -63,6 +64,7 @@ LDADD = $(top_builddir)/lib/libnghttp2.la \
+ 	@JEMALLOC_LIBS@ \
+ 	@LIBXML2_LIBS@ \
+ 	@LIBEV_LIBS@ \
++	@LIBVERTO_LIBS@ \
+ 	@LIBNGHTTP3_LIBS@ \
+ 	@LIBNGTCP2_CRYPTO_QUICTLS_LIBS@ \
+ 	@LIBNGTCP2_CRYPTO_BORINGSSL_LIBS@ \
+@@ -77,6 +79,11 @@ LDADD = $(top_builddir)/lib/libnghttp2.la \
+ 
+ if ENABLE_APP
+ 
++
++if ENABLE_LIBVERTO
++bin_PROGRAMS += nghttp_verto nghttpd_verto 
++endif # ENABLE_LIBVERTO
++
+ bin_PROGRAMS += nghttp nghttpd nghttpx
+ 
+ HELPER_OBJECTS = util.cc \
+@@ -92,25 +99,62 @@ if HAVE_LIBXML2
+ HTML_PARSER_OBJECTS += HtmlParser.cc
+ endif # HAVE_LIBXML2
+ 
++
++if ENABLE_LIBVERTO
++nghttp_verto_SOURCES = ${HELPER_OBJECTS} ${HELPER_HFILES} nghttp_verto.cc nghttp_verto.h \
++        ${HTML_PARSER_OBJECTS} ${HTML_PARSER_HFILES} \
++	tls.cc tls.h ssl_compat.h
++endif # ENABLE_LIBVERTO
++
+ nghttp_SOURCES = ${HELPER_OBJECTS} ${HELPER_HFILES} nghttp.cc nghttp.h \
+ 	${HTML_PARSER_OBJECTS} ${HTML_PARSER_HFILES} \
+ 	tls.cc tls.h ssl_compat.h
+ 
++
++if ENABLE_LIBVERTO
++nghttpd_verto_SOURCES = ${HELPER_OBJECTS} ${HELPER_HFILES} nghttpd_verto.cc \
++	tls.cc tls.h ssl_compat.h \
++	HttpServer_verto.cc HttpServer_verto.h
++endif # ENABLE_LIBVERTO
++
+ nghttpd_SOURCES = ${HELPER_OBJECTS} ${HELPER_HFILES} nghttpd.cc \
+ 	tls.cc tls.h ssl_compat.h \
+ 	HttpServer.cc HttpServer.h
+ 
++
++if ENABLE_LIBVERTO
++bin_PROGRAMS += h2load_verto 
++endif # ENABLE_LIBVERTO
++
+ bin_PROGRAMS += h2load
+ 
++if ENABLE_LIBVERTO
++h2load_verto_SOURCES = util.cc util.h \
++	http2.cc http2.h h2load_verto.cc h2load_verto.h \
++	timegm.c timegm.h \
++	tls.cc tls.h ssl_compat.h \
++	h2load_session_verto.h \
++	h2load_http2_session_verto.cc h2load_http2_session_verto.h \
++	h2load_http1_session_verto.cc h2load_http1_session_verto.h
++endif # ENABLE_LIBVERTO
++
+ h2load_SOURCES = util.cc util.h \
+ 	http2.cc http2.h h2load.cc h2load.h \
+ 	timegm.c timegm.h \
+ 	tls.cc tls.h ssl_compat.h \
+ 	h2load_session.h \
+ 	h2load_http2_session.cc h2load_http2_session.h \
+-	h2load_http1_session.cc h2load_http1_session.h
++	h2load_http1_session.cc h2load_http1_session.h 
++
+ 
+ if ENABLE_HTTP3
++if ENABLE_LIBVERTO
++h2load_verto_SOURCES += \
++	h2load_http3_session_verto.cc h2load_http3_session_verto.h \
++	h2load_quic_verto.cc h2load_quic_verto.h \
++	quic.cc quic.h
++endif # ENABLE_LIBVERTO
++
+ h2load_SOURCES += \
+ 	h2load_http3_session.cc h2load_http3_session.h \
+ 	h2load_quic.cc h2load_quic.h \
+@@ -255,3 +299,5 @@ inflatehd_SOURCES = inflatehd.cc $(HPACK_TOOLS_COMMON_SRCS)
+ deflatehd_SOURCES = deflatehd.cc $(HPACK_TOOLS_COMMON_SRCS)
+ 
+ endif # ENABLE_HPACK_TOOLS
++
++
+-- 
+2.33.0
+
