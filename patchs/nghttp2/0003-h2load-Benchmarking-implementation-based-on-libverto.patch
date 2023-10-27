@@ -1,0 +1,6093 @@
+From cd0bdcc408031d72e1cd9dcb4da6c417c89a7c4f Mon Sep 17 00:00:00 2001
+From: dengjie <1171276417@qq.com>
+Date: Thu, 26 Oct 2023 23:59:00 +0800
+Subject: [PATCH 3/4] h2load Benchmarking implementation based on libverto
+
+---
+ src/h2load_http1_session_verto.cc |  306 +++
+ src/h2load_http1_session_verto.h  |   60 +
+ src/h2load_http2_session_verto.cc |  312 +++
+ src/h2load_http2_session_verto.h  |   54 +
+ src/h2load_http3_session_verto.cc |  457 ++++
+ src/h2load_http3_session_verto.h  |   83 +
+ src/h2load_quic_verto.cc          |  838 ++++++++
+ src/h2load_quic_verto.h           |   36 +
+ src/h2load_session_verto.h        |   60 +
+ src/h2load_verto.cc               | 3277 +++++++++++++++++++++++++++++
+ src/h2load_verto.h                |  511 +++++
+ 11 files changed, 5994 insertions(+)
+ create mode 100644 src/h2load_http1_session_verto.cc
+ create mode 100644 src/h2load_http1_session_verto.h
+ create mode 100644 src/h2load_http2_session_verto.cc
+ create mode 100644 src/h2load_http2_session_verto.h
+ create mode 100644 src/h2load_http3_session_verto.cc
+ create mode 100644 src/h2load_http3_session_verto.h
+ create mode 100644 src/h2load_quic_verto.cc
+ create mode 100644 src/h2load_quic_verto.h
+ create mode 100644 src/h2load_session_verto.h
+ create mode 100644 src/h2load_verto.cc
+ create mode 100644 src/h2load_verto.h
+
+diff --git a/src/h2load_http1_session_verto.cc b/src/h2load_http1_session_verto.cc
+new file mode 100644
+index 0000000..d96befb
+--- /dev/null
++++ b/src/h2load_http1_session_verto.cc
+@@ -0,0 +1,306 @@
++/*
++ * nghttp2 - HTTP/2 C Library
++ *
++ * Copyright (c) 2015 British Broadcasting Corporation
++ *
++ * Permission is hereby granted, free of charge, to any person obtaining
++ * a copy of this software and associated documentation files (the
++ * "Software"), to deal in the Software without restriction, including
++ * without limitation the rights to use, copy, modify, merge, publish,
++ * distribute, sublicense, and/or sell copies of the Software, and to
++ * permit persons to whom the Software is furnished to do so, subject to
++ * the following conditions:
++ *
++ * The above copyright notice and this permission notice shall be
++ * included in all copies or substantial portions of the Software.
++ *
++ * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND,
++ * EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF
++ * MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND
++ * NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE
++ * LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION
++ * OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION
++ * WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
++ */
++#include "h2load_http1_session_verto.h"
++
++#include <cassert>
++#include <cerrno>
++
++#include "h2load_verto.h"
++#include "util.h"
++#include "template.h"
++
++#include <iostream>
++#include <fstream>
++ 
++using namespace nghttp2;
++
++namespace h2load {
++
++namespace {
++// HTTP response message begin
++int htp_msg_begincb(llhttp_t *htp) {
++  auto session = static_cast<Http1Session *>(htp->data);
++
++  if (session->stream_resp_counter_ > session->stream_req_counter_) {
++    return -1;
++  }
++
++  return 0;
++}
++} // namespace
++
++namespace {
++// HTTP response status code
++int htp_statuscb(llhttp_t *htp, const char *at, size_t length) {
++  auto session = static_cast<Http1Session *>(htp->data);
++  auto client = session->get_client();
++
++  if (htp->status_code / 100 == 1) {
++    return 0;
++  }
++
++  client->on_status_code(session->stream_resp_counter_, htp->status_code);
++
++  return 0;
++}
++} // namespace
++
++namespace {
++// HTTP response message complete
++int htp_msg_completecb(llhttp_t *htp) {
++  auto session = static_cast<Http1Session *>(htp->data);
++  auto client = session->get_client();
++
++  if (htp->status_code / 100 == 1) {
++    return 0;
++  }
++
++  client->final = llhttp_should_keep_alive(htp) == 0;
++  auto req_stat = client->get_req_stat(session->stream_resp_counter_);
++
++  assert(req_stat);
++
++  auto config = client->worker->config;
++  if (req_stat->data_offset >= config->data_length) {
++    client->on_stream_close(session->stream_resp_counter_, true, client->final);
++  }
++
++  session->stream_resp_counter_ += 2;
++
++  if (client->final) {
++    session->stream_req_counter_ = session->stream_resp_counter_;
++
++    // Connection is going down.  If we have still request to do,
++    // create new connection and keep on doing the job.
++    if (client->req_left) {
++      client->try_new_connection();
++    }
++
++    return HPE_PAUSED;
++  }
++
++  return 0;
++}
++} // namespace
++
++namespace {
++int htp_hdr_keycb(llhttp_t *htp, const char *data, size_t len) {
++  auto session = static_cast<Http1Session *>(htp->data);
++  auto client = session->get_client();
++
++  client->worker->stats.bytes_head += len;
++  client->worker->stats.bytes_head_decomp += len;
++  return 0;
++}
++} // namespace
++
++namespace {
++int htp_hdr_valcb(llhttp_t *htp, const char *data, size_t len) {
++  auto session = static_cast<Http1Session *>(htp->data);
++  auto client = session->get_client();
++
++  client->worker->stats.bytes_head += len;
++  client->worker->stats.bytes_head_decomp += len;
++  return 0;
++}
++} // namespace
++
++namespace {
++int htp_hdrs_completecb(llhttp_t *htp) {
++  return !http2::expect_response_body(htp->status_code);
++}
++} // namespace
++
++namespace {
++int htp_body_cb(llhttp_t *htp, const char *data, size_t len) {
++  auto session = static_cast<Http1Session *>(htp->data);
++  auto client = session->get_client();
++
++  client->record_ttfb();
++  client->worker->stats.bytes_body += len;
++
++  return 0;
++}
++} // namespace
++
++namespace {
++constexpr llhttp_settings_t htp_hooks = {
++    htp_msg_begincb,     // llhttp_cb      on_message_begin;
++    nullptr,             // llhttp_data_cb on_url;
++    htp_statuscb,        // llhttp_data_cb on_status;
++    nullptr,             // llhttp_data_cb on_method;
++    nullptr,             // llhttp_data_cb on_version;
++    htp_hdr_keycb,       // llhttp_data_cb on_header_field;
++    htp_hdr_valcb,       // llhttp_data_cb on_header_value;
++    nullptr,             // llhttp_data_cb on_chunk_extension_name;
++    nullptr,             // llhttp_data_cb on_chunk_extension_value;
++    htp_hdrs_completecb, // llhttp_cb      on_headers_complete;
++    htp_body_cb,         // llhttp_data_cb on_body;
++    htp_msg_completecb,  // llhttp_cb      on_message_complete;
++    nullptr,             // llhttp_cb      on_url_complete;
++    nullptr,             // llhttp_cb      on_status_complete;
++    nullptr,             // llhttp_cb      on_method_complete;
++    nullptr,             // llhttp_cb      on_version_complete;
++    nullptr,             // llhttp_cb      on_header_field_complete;
++    nullptr,             // llhttp_cb      on_header_value_complete;
++    nullptr,             // llhttp_cb      on_chunk_extension_name_complete;
++    nullptr,             // llhttp_cb      on_chunk_extension_value_complete;
++    nullptr,             // llhttp_cb      on_chunk_header;
++    nullptr,             // llhttp_cb      on_chunk_complete;
++    nullptr,             // llhttp_cb      on_reset;
++};
++} // namespace
++
++Http1Session::Http1Session(Client *client)
++    : stream_req_counter_(1),
++      stream_resp_counter_(1),
++      client_(client),
++      htp_(),
++      complete_(false) {
++  llhttp_init(&htp_, HTTP_RESPONSE, &htp_hooks);
++  htp_.data = this;
++}
++
++Http1Session::~Http1Session() {}
++
++void Http1Session::on_connect() { client_->signal_write(); }
++
++int Http1Session::submit_request() {
++  auto config = client_->worker->config;
++  const auto &req = config->h1reqs[client_->reqidx];
++  client_->reqidx++;
++
++  if (client_->reqidx == config->h1reqs.size()) {
++    client_->reqidx = 0;
++  }
++
++  client_->on_request(stream_req_counter_);
++
++  auto req_stat = client_->get_req_stat(stream_req_counter_);
++
++  client_->record_request_time(req_stat);
++  client_->wb.append(req);
++
++  if (config->data_fd == -1 || config->data_length == 0) {
++    // increment for next request
++    stream_req_counter_ += 2;
++
++    return 0;
++  }
++
++  return on_write();
++}
++
++int Http1Session::on_read(const uint8_t *data, size_t len) {
++  auto htperr =
++      llhttp_execute(&htp_, reinterpret_cast<const char *>(data), len);
++  auto nread = htperr == HPE_OK
++                   ? len
++                   : static_cast<size_t>(reinterpret_cast<const uint8_t *>(
++                                             llhttp_get_error_pos(&htp_)) -
++                                         data);
++
++  if (client_->worker->config->verbose) {
++    std::cout.write(reinterpret_cast<const char *>(data), nread);
++  }
++
++  if (htperr == HPE_PAUSED) {
++    // pause is done only when connection: close is requested
++    return -1;
++  }
++
++  if (htperr != HPE_OK) {
++    std::cerr << "[ERROR] HTTP parse error: "
++              << "(" << llhttp_errno_name(htperr) << ") "
++              << llhttp_get_error_reason(&htp_) << std::endl;
++    return -1;
++  }
++
++  return 0;
++}
++
++int Http1Session::on_write() {
++  if (complete_) {
++    return -1;
++  }
++
++  auto config = client_->worker->config;
++  auto req_stat = client_->get_req_stat(stream_req_counter_);
++  if (!req_stat) {
++    return 0;
++  }
++
++  if (req_stat->data_offset < config->data_length) {
++    auto req_stat = client_->get_req_stat(stream_req_counter_);
++    auto &wb = client_->wb;
++
++    // TODO unfortunately, wb has no interface to use with read(2)
++    // family functions.
++    std::array<uint8_t, 16_k> buf;
++
++    ssize_t nread;
++    while ((nread = pread(config->data_fd, buf.data(), buf.size(),
++                          req_stat->data_offset)) == -1 &&
++           errno == EINTR)
++      ;
++
++    if (nread == -1) {
++      return -1;
++    }
++
++    req_stat->data_offset += nread;
++
++    wb.append(buf.data(), nread);
++
++    if (client_->worker->config->verbose) {
++      std::cout << "[send " << nread << " byte(s)]" << std::endl;
++    }
++
++    if (req_stat->data_offset == config->data_length) {
++      // increment for next request
++      stream_req_counter_ += 2;
++
++      if (stream_resp_counter_ == stream_req_counter_) {
++        // Response has already been received
++        client_->on_stream_close(stream_resp_counter_ - 2, true,
++                                 client_->final);
++      }
++    }
++  }
++
++  return 0;
++}
++
++void Http1Session::terminate() { complete_ = true; }
++
++Client *Http1Session::get_client() { return client_; }
++
++size_t Http1Session::max_concurrent_streams() {
++  auto config = client_->worker->config;
++
++  return config->data_fd == -1 ? config->max_concurrent_streams : 1;
++}
++
++} // namespace h2load
+diff --git a/src/h2load_http1_session_verto.h b/src/h2load_http1_session_verto.h
+new file mode 100644
+index 0000000..13a69d4
+--- /dev/null
++++ b/src/h2load_http1_session_verto.h
+@@ -0,0 +1,60 @@
++ /*
++ * nghttp2 - HTTP/2 C Library
++ *
++ * Copyright (c) 2015 British Broadcasting Corporation
++ *
++ * Permission is hereby granted, free of charge, to any person obtaining
++ * a copy of this software and associated documentation files (the
++ * "Software"), to deal in the Software without restriction, including
++ * without limitation the rights to use, copy, modify, merge, publish,
++ * distribute, sublicense, and/or sell copies of the Software, and to
++ * permit persons to whom the Software is furnished to do so, subject to
++ * the following conditions:
++ *
++ * The above copyright notice and this permission notice shall be
++ * included in all copies or substantial portions of the Software.
++ *
++ * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND,
++ * EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF
++ * MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND
++ * NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE
++ * LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION
++ * OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION
++ * WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
++ */
++#ifndef H2LOAD_HTTP1_SESSION_H
++#define H2LOAD_HTTP1_SESSION_H
++
++#include "h2load_session_verto.h"
++
++#include <nghttp2/nghttp2.h>
++
++#include "llhttp.h"
++
++namespace h2load {
++
++struct Client;
++
++class Http1Session : public Session {
++public:
++  Http1Session(Client *client);
++  virtual ~Http1Session();
++  virtual void on_connect();
++  virtual int submit_request();
++  virtual int on_read(const uint8_t *data, size_t len);
++  virtual int on_write();
++  virtual void terminate();
++  virtual size_t max_concurrent_streams();
++  Client *get_client();
++  int32_t stream_req_counter_;
++  int32_t stream_resp_counter_;
++
++private:
++  Client *client_;
++  llhttp_t htp_;
++  bool complete_;
++};
++
++} // namespace h2load
++
++#endif // H2LOAD_HTTP1_SESSION_H
+diff --git a/src/h2load_http2_session_verto.cc b/src/h2load_http2_session_verto.cc
+new file mode 100644
+index 0000000..d846d52
+--- /dev/null
++++ b/src/h2load_http2_session_verto.cc
+@@ -0,0 +1,312 @@
++/*
++ * nghttp2 - HTTP/2 C Library
++ *
++ * Copyright (c) 2014 Tatsuhiro Tsujikawa
++ *
++ * Permission is hereby granted, free of charge, to any person obtaining
++ * a copy of this software and associated documentation files (the
++ * "Software"), to deal in the Software without restriction, including
++ * without limitation the rights to use, copy, modify, merge, publish,
++ * distribute, sublicense, and/or sell copies of the Software, and to
++ * permit persons to whom the Software is furnished to do so, subject to
++ * the following conditions:
++ *
++ * The above copyright notice and this permission notice shall be
++ * included in all copies or substantial portions of the Software.
++ *
++ * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND,
++ * EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF
++ * MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND
++ * NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE
++ * LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION
++ * OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION
++ * WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
++ */
++#include "h2load_http2_session_verto.h"
++
++#include <cassert>
++#include <cerrno>
++#include <iostream>
++
++#include "h2load_verto.h"
++#include "util.h"
++#include "template.h"
++
++using namespace nghttp2;
++
++namespace h2load {
++
++Http2Session::Http2Session(Client *client)
++    : client_(client), session_(nullptr) { 
++}
++
++Http2Session::~Http2Session() { nghttp2_session_del(session_); }
++
++namespace {
++int on_header_callback(nghttp2_session *session, const nghttp2_frame *frame,
++                       const uint8_t *name, size_t namelen,
++                       const uint8_t *value, size_t valuelen, uint8_t flags,
++                       void *user_data) {
++  auto client = static_cast<Client *>(user_data);
++  if (frame->hd.type != NGHTTP2_HEADERS ||
++      frame->headers.cat != NGHTTP2_HCAT_RESPONSE) {
++    return 0; 
++  }
++  client->on_header(frame->hd.stream_id, name, namelen, value, valuelen);
++  client->worker->stats.bytes_head_decomp += namelen + valuelen;
++
++  if (client->worker->config->verbose) {
++    std::cout << "[stream_id=" << frame->hd.stream_id << "] ";
++    std::cout.write(reinterpret_cast<const char *>(name), namelen);
++    std::cout << ": ";
++    std::cout.write(reinterpret_cast<const char *>(value), valuelen);
++    std::cout << "\n";
++  }
++
++  return 0;
++}
++} // namespace
++
++namespace {
++int on_frame_recv_callback(nghttp2_session *session, const nghttp2_frame *frame,
++                           void *user_data) {
++  auto client = static_cast<Client *>(user_data);
++  if (frame->hd.type != NGHTTP2_HEADERS ||
++      frame->headers.cat != NGHTTP2_HCAT_RESPONSE) {
++    return 0;
++  }
++  client->worker->stats.bytes_head +=
++      frame->hd.length - frame->headers.padlen -
++      ((frame->hd.flags & NGHTTP2_FLAG_PRIORITY) ? 5 : 0);
++  if (frame->hd.flags & NGHTTP2_FLAG_END_STREAM) {
++    client->record_ttfb();
++  }
++  return 0;
++}
++} // namespace
++
++namespace {
++int on_data_chunk_recv_callback(nghttp2_session *session, uint8_t flags,
++                                int32_t stream_id, const uint8_t *data,
++                                size_t len, void *user_data) {
++  auto client = static_cast<Client *>(user_data);
++  client->record_ttfb();
++  client->worker->stats.bytes_body += len;
++  return 0;
++}
++} // namespace
++
++namespace {
++int on_stream_close_callback(nghttp2_session *session, int32_t stream_id,
++                             uint32_t error_code, void *user_data) {
++  auto client = static_cast<Client *>(user_data);
++  client->on_stream_close(stream_id, error_code == NGHTTP2_NO_ERROR);
++
++  return 0;
++}
++} // namespace
++
++namespace {
++int before_frame_send_callback(nghttp2_session *session,
++                               const nghttp2_frame *frame, void *user_data) {
++  if (frame->hd.type != NGHTTP2_HEADERS ||
++      frame->headers.cat != NGHTTP2_HCAT_REQUEST) {
++    return 0;
++  }
++
++  auto client = static_cast<Client *>(user_data);
++  auto req_stat = client->get_req_stat(frame->hd.stream_id);
++  assert(req_stat);
++  client->record_request_time(req_stat);
++
++  return 0;
++}
++} // namespace
++
++namespace {
++ssize_t file_read_callback(nghttp2_session *session, int32_t stream_id,
++                           uint8_t *buf, size_t length, uint32_t *data_flags,
++                           nghttp2_data_source *source, void *user_data) {
++  auto client = static_cast<Client *>(user_data);
++  auto config = client->worker->config;
++  auto req_stat = client->get_req_stat(stream_id);
++  assert(req_stat);
++  ssize_t nread;
++  while ((nread = pread(config->data_fd, buf, length, req_stat->data_offset)) ==
++             -1 &&
++         errno == EINTR)
++    ;
++
++  if (nread == -1) {
++    return NGHTTP2_ERR_TEMPORAL_CALLBACK_FAILURE;
++  }
++
++  req_stat->data_offset += nread;
++
++  if (req_stat->data_offset == config->data_length) {
++    *data_flags |= NGHTTP2_DATA_FLAG_EOF;
++    return nread;
++  }
++
++  if (req_stat->data_offset > config->data_length || nread == 0) {
++    return NGHTTP2_ERR_TEMPORAL_CALLBACK_FAILURE;
++  }
++
++  return nread;
++}
++
++} // namespace
++
++namespace {
++ssize_t send_callback(nghttp2_session *session, const uint8_t *data,
++                      size_t length, int flags, void *user_data) {
++  auto client = static_cast<Client *>(user_data);
++  auto &wb = client->wb;
++
++  if (wb.rleft() >= BACKOFF_WRITE_BUFFER_THRES) {
++    return NGHTTP2_ERR_WOULDBLOCK;
++  }
++
++  return wb.append(data, length);
++}
++} // namespace
++
++void Http2Session::on_connect() {
++  int rv;
++
++  // This is required with --disable-assert.
++  (void)rv;
++
++  nghttp2_session_callbacks *callbacks;
++
++  nghttp2_session_callbacks_new(&callbacks);
++
++  auto callbacks_deleter = defer(nghttp2_session_callbacks_del, callbacks);
++
++  nghttp2_session_callbacks_set_on_frame_recv_callback(callbacks,
++                                                       on_frame_recv_callback);
++
++  nghttp2_session_callbacks_set_on_data_chunk_recv_callback(
++      callbacks, on_data_chunk_recv_callback);
++
++  nghttp2_session_callbacks_set_on_stream_close_callback(
++      callbacks, on_stream_close_callback);
++
++  nghttp2_session_callbacks_set_on_header_callback(callbacks,
++                                                   on_header_callback);
++
++  nghttp2_session_callbacks_set_before_frame_send_callback(
++      callbacks, before_frame_send_callback);
++
++  nghttp2_session_callbacks_set_send_callback(callbacks, send_callback);
++
++  nghttp2_option *opt;
++
++  rv = nghttp2_option_new(&opt);
++
++  assert(rv == 0);
++
++  auto config = client_->worker->config;
++
++  if (config->encoder_header_table_size != NGHTTP2_DEFAULT_HEADER_TABLE_SIZE) {
++    nghttp2_option_set_max_deflate_dynamic_table_size(
++        opt, config->encoder_header_table_size);
++  }
++
++  nghttp2_session_client_new2(&session_, callbacks, client_, opt);
++
++  nghttp2_option_del(opt);
++
++  std::array<nghttp2_settings_entry, 4> iv;
++  size_t niv = 2;
++  iv[0].settings_id = NGHTTP2_SETTINGS_ENABLE_PUSH;
++  iv[0].value = 0;
++  iv[1].settings_id = NGHTTP2_SETTINGS_INITIAL_WINDOW_SIZE;
++  iv[1].value = (1 << config->window_bits) - 1;
++
++  if (config->header_table_size != NGHTTP2_DEFAULT_HEADER_TABLE_SIZE) {
++    iv[niv].settings_id = NGHTTP2_SETTINGS_HEADER_TABLE_SIZE;
++    iv[niv].value = config->header_table_size;
++    ++niv;
++  }
++  if (config->max_frame_size != 16_k) {
++    iv[niv].settings_id = NGHTTP2_SETTINGS_MAX_FRAME_SIZE;
++    iv[niv].value = config->max_frame_size;
++    ++niv;
++  }
++
++  rv = nghttp2_submit_settings(session_, NGHTTP2_FLAG_NONE, iv.data(), niv);
++
++  assert(rv == 0);
++
++  auto connection_window = (1 << config->connection_window_bits) - 1;
++  nghttp2_session_set_local_window_size(session_, NGHTTP2_FLAG_NONE, 0,
++                                        connection_window);
++
++}
++
++int Http2Session::submit_request() {
++  if (nghttp2_session_check_request_allowed(session_) == 0) {
++    return -1;
++  }
++
++  auto config = client_->worker->config;
++  auto &nva = config->nva[client_->reqidx++];
++
++  if (client_->reqidx == config->nva.size()) {
++    client_->reqidx = 0;
++  }
++
++  nghttp2_data_provider prd{{0}, file_read_callback};
++
++  auto stream_id =
++      nghttp2_submit_request(session_, nullptr, nva.data(), nva.size(),
++                             config->data_fd == -1 ? nullptr : &prd, nullptr);
++  if (stream_id < 0) {
++    return -1;
++  }
++
++  client_->on_request(stream_id);
++
++  return 0;
++}
++
++int Http2Session::on_read(const uint8_t *data, size_t len) {
++  auto rv = nghttp2_session_mem_recv(session_, data, len);
++  if (rv < 0) {
++    return -1;
++  }
++
++  assert(static_cast<size_t>(rv) == len);
++
++  if (nghttp2_session_want_read(session_) == 0 &&
++      nghttp2_session_want_write(session_) == 0 && client_->wb.rleft() == 0) {
++    return -1;
++  }
++
++  return 0;
++}
++
++int Http2Session::on_write() {
++  auto rv = nghttp2_session_send(session_);
++  if (rv != 0) {
++    return -1;
++  }
++
++  if (nghttp2_session_want_read(session_) == 0 &&
++      nghttp2_session_want_write(session_) == 0 && client_->wb.rleft() == 0) {
++    return -1;
++  }
++
++  return 0;
++}
++
++void Http2Session::terminate() {
++  nghttp2_session_terminate_session(session_, NGHTTP2_NO_ERROR);
++}
++
++size_t Http2Session::max_concurrent_streams() {
++  return (size_t)client_->worker->config->max_concurrent_streams;
++}
++
++} // namespace h2load
+diff --git a/src/h2load_http2_session_verto.h b/src/h2load_http2_session_verto.h
+new file mode 100644
+index 0000000..3e2bb44
+--- /dev/null
++++ b/src/h2load_http2_session_verto.h
+@@ -0,0 +1,54 @@
++ /*
++ * nghttp2 - HTTP/2 C Library
++ *
++ * Copyright (c) 2014 Tatsuhiro Tsujikawa
++ *
++ * Permission is hereby granted, free of charge, to any person obtaining
++ * a copy of this software and associated documentation files (the
++ * "Software"), to deal in the Software without restriction, including
++ * without limitation the rights to use, copy, modify, merge, publish,
++ * distribute, sublicense, and/or sell copies of the Software, and to
++ * permit persons to whom the Software is furnished to do so, subject to
++ * the following conditions:
++ *
++ * The above copyright notice and this permission notice shall be
++ * included in all copies or substantial portions of the Software.
++ *
++ * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND,
++ * EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF
++ * MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND
++ * NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE
++ * LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION
++ * OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION
++ * WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
++ */
++#ifndef H2LOAD_HTTP2_SESSION_H
++#define H2LOAD_HTTP2_SESSION_H
++
++#include "h2load_session_verto.h"
++
++#include <nghttp2/nghttp2.h>
++
++namespace h2load {
++
++struct Client;
++
++class Http2Session : public Session {
++public:
++  Http2Session(Client *client);
++  virtual ~Http2Session();
++  virtual void on_connect();
++  virtual int submit_request();
++  virtual int on_read(const uint8_t *data, size_t len);
++  virtual int on_write();
++  virtual void terminate();
++  virtual size_t max_concurrent_streams();
++
++private:
++  Client *client_;
++  nghttp2_session *session_;
++};
++
++} // namespace h2load
++
++#endif // H2LOAD_HTTP2_SESSION_H
+diff --git a/src/h2load_http3_session_verto.cc b/src/h2load_http3_session_verto.cc
+new file mode 100644
+index 0000000..e2e43fc
+--- /dev/null
++++ b/src/h2load_http3_session_verto.cc
+@@ -0,0 +1,457 @@
++ /*
++ * nghttp2 - HTTP/2 C Library
++ *
++ * Copyright (c) 2019 nghttp2 contributors
++ *
++ * Permission is hereby granted, free of charge, to any person obtaining
++ * a copy of this software and associated documentation files (the
++ * "Software"), to deal in the Software without restriction, including
++ * without limitation the rights to use, copy, modify, merge, publish,
++ * distribute, sublicense, and/or sell copies of the Software, and to
++ * permit persons to whom the Software is furnished to do so, subject to
++ * the following conditions:
++ *
++ * The above copyright notice and this permission notice shall be
++ * included in all copies or substantial portions of the Software.
++ *
++ * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND,
++ * EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF
++ * MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND
++ * NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE
++ * LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION
++ * OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION
++ * WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
++ */
++#include "h2load_http3_session_verto.h"
++
++#include <iostream>
++
++#include <ngtcp2/ngtcp2.h>
++
++#include "h2load_verto.h"
++
++namespace h2load {
++
++Http3Session::Http3Session(Client *client)
++    : client_(client), conn_(nullptr), npending_request_(0), reqidx_(0) {}
++
++Http3Session::~Http3Session() { nghttp3_conn_del(conn_); }
++
++void Http3Session::on_connect() {}
++
++int Http3Session::submit_request() {
++  if (npending_request_) {
++    ++npending_request_;
++    return 0;
++  }
++
++  auto config = client_->worker->config;
++  reqidx_ = client_->reqidx;
++
++  if (++client_->reqidx == config->nva.size()) {
++    client_->reqidx = 0;
++  }
++
++  auto stream_id = submit_request_internal();
++  if (stream_id < 0) {
++    if (stream_id == NGTCP2_ERR_STREAM_ID_BLOCKED) {
++      ++npending_request_;
++      return 0;
++    }
++    return -1;
++  }
++
++  return 0;
++}
++
++namespace {
++nghttp3_ssize read_data(nghttp3_conn *conn, int64_t stream_id, nghttp3_vec *vec,
++                        size_t veccnt, uint32_t *pflags, void *user_data,
++                        void *stream_user_data) {
++  auto s = static_cast<Http3Session *>(user_data);
++
++  s->read_data(vec, veccnt, pflags);
++
++  return 1;
++}
++} // namespace
++
++void Http3Session::read_data(nghttp3_vec *vec, size_t veccnt,
++                             uint32_t *pflags) {
++  assert(veccnt > 0);
++
++  auto config = client_->worker->config;
++
++  vec[0].base = config->data;
++  vec[0].len = config->data_length;
++  *pflags |= NGHTTP3_DATA_FLAG_EOF;
++}
++
++int64_t Http3Session::submit_request_internal() {
++  int rv;
++  int64_t stream_id;
++
++  auto config = client_->worker->config;
++  auto &nva = config->nva[reqidx_];
++
++  rv = ngtcp2_conn_open_bidi_stream(client_->quic.conn, &stream_id, nullptr);
++  if (rv != 0) {
++    return rv;
++  }
++
++  nghttp3_data_reader dr{};
++  dr.read_data = h2load::read_data;
++
++  rv = nghttp3_conn_submit_request(
++      conn_, stream_id, reinterpret_cast<nghttp3_nv *>(nva.data()), nva.size(),
++      config->data_fd == -1 ? nullptr : &dr, nullptr);
++  if (rv != 0) {
++    return rv;
++  }
++
++  client_->on_request(stream_id);
++  auto req_stat = client_->get_req_stat(stream_id);
++  assert(req_stat);
++  client_->record_request_time(req_stat);
++
++  return stream_id;
++}
++
++int Http3Session::on_read(const uint8_t *data, size_t len) { return -1; }
++
++int Http3Session::on_write() { return -1; }
++
++void Http3Session::terminate() {}
++
++size_t Http3Session::max_concurrent_streams() {
++  return (size_t)client_->worker->config->max_concurrent_streams;
++}
++
++namespace {
++int stream_close(nghttp3_conn *conn, int64_t stream_id, uint64_t app_error_code,
++                 void *user_data, void *stream_user_data) {
++  auto s = static_cast<Http3Session *>(user_data);
++  if (s->stream_close(stream_id, app_error_code) != 0) {
++    return NGHTTP3_ERR_CALLBACK_FAILURE;
++  }
++  return 0;
++}
++} // namespace
++
++int Http3Session::stream_close(int64_t stream_id, uint64_t app_error_code) {
++  if (!ngtcp2_is_bidi_stream(stream_id)) {
++    assert(!ngtcp2_conn_is_local_stream(client_->quic.conn, stream_id));
++    ngtcp2_conn_extend_max_streams_uni(client_->quic.conn, 1);
++  }
++  client_->on_stream_close(stream_id, app_error_code == NGHTTP3_H3_NO_ERROR);
++  return 0;
++}
++
++namespace {
++int recv_data(nghttp3_conn *conn, int64_t stream_id, const uint8_t *data,
++              size_t datalen, void *user_data, void *stream_user_data) {
++  auto s = static_cast<Http3Session *>(user_data);
++  s->recv_data(stream_id, data, datalen);
++  return 0;
++}
++} // namespace
++
++void Http3Session::recv_data(int64_t stream_id, const uint8_t *data,
++                             size_t datalen) {
++  client_->record_ttfb();
++  client_->worker->stats.bytes_body += datalen;
++  consume(stream_id, datalen);
++}
++
++namespace {
++int deferred_consume(nghttp3_conn *conn, int64_t stream_id, size_t nconsumed,
++                     void *user_data, void *stream_user_data) {
++  auto s = static_cast<Http3Session *>(user_data);
++  s->consume(stream_id, nconsumed);
++  return 0;
++}
++} // namespace
++
++void Http3Session::consume(int64_t stream_id, size_t nconsumed) {
++  ngtcp2_conn_extend_max_stream_offset(client_->quic.conn, stream_id,
++                                       nconsumed);
++  ngtcp2_conn_extend_max_offset(client_->quic.conn, nconsumed);
++}
++
++namespace {
++int begin_headers(nghttp3_conn *conn, int64_t stream_id, void *user_data,
++                  void *stream_user_data) {
++  auto s = static_cast<Http3Session *>(user_data);
++  s->begin_headers(stream_id);
++  return 0;
++}
++} // namespace
++
++void Http3Session::begin_headers(int64_t stream_id) {
++  auto payloadlen = nghttp3_conn_get_frame_payload_left(conn_, stream_id);
++  assert(payloadlen > 0);
++
++  client_->worker->stats.bytes_head += payloadlen;
++}
++
++namespace {
++int recv_header(nghttp3_conn *conn, int64_t stream_id, int32_t token,
++                nghttp3_rcbuf *name, nghttp3_rcbuf *value, uint8_t flags,
++                void *user_data, void *stream_user_data) {
++  auto s = static_cast<Http3Session *>(user_data);
++  auto k = nghttp3_rcbuf_get_buf(name);
++  auto v = nghttp3_rcbuf_get_buf(value);
++  s->recv_header(stream_id, &k, &v);
++  return 0;
++}
++} // namespace
++
++void Http3Session::recv_header(int64_t stream_id, const nghttp3_vec *name,
++                               const nghttp3_vec *value) {
++  client_->on_header(stream_id, name->base, name->len, value->base, value->len);
++  client_->worker->stats.bytes_head_decomp += name->len + value->len;
++}
++
++namespace {
++int stop_sending(nghttp3_conn *conn, int64_t stream_id, uint64_t app_error_code,
++                 void *user_data, void *stream_user_data) {
++  auto s = static_cast<Http3Session *>(user_data);
++  if (s->stop_sending(stream_id, app_error_code) != 0) {
++    return NGHTTP3_ERR_CALLBACK_FAILURE;
++  }
++  return 0;
++}
++} // namespace
++
++int Http3Session::stop_sending(int64_t stream_id, uint64_t app_error_code) {
++  auto rv = ngtcp2_conn_shutdown_stream_read(client_->quic.conn, 0, stream_id,
++                                             app_error_code);
++  if (rv != 0) {
++    std::cerr << "ngtcp2_conn_shutdown_stream_read: " << ngtcp2_strerror(rv)
++              << std::endl;
++    return -1;
++  }
++  return 0;
++}
++
++namespace {
++int reset_stream(nghttp3_conn *conn, int64_t stream_id, uint64_t app_error_code,
++                 void *user_data, void *stream_user_data) {
++  auto s = static_cast<Http3Session *>(user_data);
++  if (s->reset_stream(stream_id, app_error_code) != 0) {
++    return NGHTTP3_ERR_CALLBACK_FAILURE;
++  }
++  return 0;
++}
++} // namespace
++
++int Http3Session::reset_stream(int64_t stream_id, uint64_t app_error_code) {
++  auto rv = ngtcp2_conn_shutdown_stream_write(client_->quic.conn, 0, stream_id,
++                                              app_error_code);
++  if (rv != 0) {
++    std::cerr << "ngtcp2_conn_shutdown_stream_write: " << ngtcp2_strerror(rv)
++              << std::endl;
++    return -1;
++  }
++  return 0;
++}
++
++int Http3Session::close_stream(int64_t stream_id, uint64_t app_error_code) {
++  auto rv = nghttp3_conn_close_stream(conn_, stream_id, app_error_code);
++  switch (rv) {
++  case 0:
++    return 0;
++  case NGHTTP3_ERR_STREAM_NOT_FOUND:
++    if (!ngtcp2_is_bidi_stream(stream_id)) {
++      assert(!ngtcp2_conn_is_local_stream(client_->quic.conn, stream_id));
++      ngtcp2_conn_extend_max_streams_uni(client_->quic.conn, 1);
++    }
++    return 0;
++  default:
++    return -1;
++  }
++}
++
++int Http3Session::shutdown_stream_read(int64_t stream_id) {
++  auto rv = nghttp3_conn_shutdown_stream_read(conn_, stream_id);
++  if (rv != 0) {
++    return -1;
++  }
++  return 0;
++}
++
++int Http3Session::extend_max_local_streams() {
++  auto config = client_->worker->config;
++
++  for (; npending_request_; --npending_request_) {
++    auto stream_id = submit_request_internal();
++    if (stream_id < 0) {
++      if (stream_id == NGTCP2_ERR_STREAM_ID_BLOCKED) {
++        return 0;
++      }
++      return -1;
++    }
++
++    if (++reqidx_ == config->nva.size()) {
++      reqidx_ = 0;
++    }
++  }
++
++  return 0;
++}
++
++int Http3Session::init_conn() {
++  int rv;
++
++  assert(conn_ == nullptr);
++
++  if (ngtcp2_conn_get_streams_uni_left(client_->quic.conn) < 3) {
++    return -1;
++  }
++
++  nghttp3_callbacks callbacks{
++      nullptr, // acked_stream_data
++      h2load::stream_close,
++      h2load::recv_data,
++      h2load::deferred_consume,
++      h2load::begin_headers,
++      h2load::recv_header,
++      nullptr, // end_headers
++      nullptr, // begin_trailers
++      h2load::recv_header,
++      nullptr, // end_trailers
++      h2load::stop_sending,
++      nullptr, // end_stream
++      h2load::reset_stream,
++      nullptr, // shutdown
++  };
++
++  auto config = client_->worker->config;
++
++  nghttp3_settings settings;
++  nghttp3_settings_default(&settings);
++  settings.qpack_max_dtable_capacity = config->header_table_size;
++  settings.qpack_blocked_streams = 100;
++
++  auto mem = nghttp3_mem_default();
++
++  rv = nghttp3_conn_client_new(&conn_, &callbacks, &settings, mem, this);
++  if (rv != 0) {
++    std::cerr << "nghttp3_conn_client_new: " << nghttp3_strerror(rv)
++              << std::endl;
++    return -1;
++  }
++
++  int64_t ctrl_stream_id;
++
++  rv =
++      ngtcp2_conn_open_uni_stream(client_->quic.conn, &ctrl_stream_id, nullptr);
++  if (rv != 0) {
++    std::cerr << "ngtcp2_conn_open_uni_stream: " << ngtcp2_strerror(rv)
++              << std::endl;
++    return -1;
++  }
++
++  rv = nghttp3_conn_bind_control_stream(conn_, ctrl_stream_id);
++  if (rv != 0) {
++    std::cerr << "nghttp3_conn_bind_control_stream: " << nghttp3_strerror(rv)
++              << std::endl;
++    return -1;
++  }
++
++  int64_t qpack_enc_stream_id, qpack_dec_stream_id;
++
++  rv = ngtcp2_conn_open_uni_stream(client_->quic.conn, &qpack_enc_stream_id,
++                                   nullptr);
++  if (rv != 0) {
++    std::cerr << "ngtcp2_conn_open_uni_stream: " << ngtcp2_strerror(rv)
++              << std::endl;
++    return -1;
++  }
++
++  rv = ngtcp2_conn_open_uni_stream(client_->quic.conn, &qpack_dec_stream_id,
++                                   nullptr);
++  if (rv != 0) {
++    std::cerr << "ngtcp2_conn_open_uni_stream: " << ngtcp2_strerror(rv)
++              << std::endl;
++    return -1;
++  }
++
++  rv = nghttp3_conn_bind_qpack_streams(conn_, qpack_enc_stream_id,
++                                       qpack_dec_stream_id);
++  if (rv != 0) {
++    std::cerr << "nghttp3_conn_bind_qpack_streams: " << nghttp3_strerror(rv)
++              << std::endl;
++    return -1;
++  }
++
++  return 0;
++}
++
++ssize_t Http3Session::read_stream(uint32_t flags, int64_t stream_id,
++                                  const uint8_t *data, size_t datalen) {
++  auto nconsumed = nghttp3_conn_read_stream(
++      conn_, stream_id, data, datalen, flags & NGTCP2_STREAM_DATA_FLAG_FIN);
++  if (nconsumed < 0) {
++    std::cerr << "nghttp3_conn_read_stream: " << nghttp3_strerror(nconsumed)
++              << std::endl;
++    ngtcp2_ccerr_set_application_error(
++        &client_->quic.last_error,
++        nghttp3_err_infer_quic_app_error_code(nconsumed), nullptr, 0);
++    return -1;
++  }
++  return nconsumed;
++}
++
++ssize_t Http3Session::write_stream(int64_t &stream_id, int &fin,
++                                   nghttp3_vec *vec, size_t veccnt) {
++  auto sveccnt =
++      nghttp3_conn_writev_stream(conn_, &stream_id, &fin, vec, veccnt);
++  if (sveccnt < 0) {
++    ngtcp2_ccerr_set_application_error(
++        &client_->quic.last_error,
++        nghttp3_err_infer_quic_app_error_code(sveccnt), nullptr, 0);
++    return -1;
++  }
++  return sveccnt;
++}
++
++void Http3Session::block_stream(int64_t stream_id) {
++  nghttp3_conn_block_stream(conn_, stream_id);
++}
++
++int Http3Session::unblock_stream(int64_t stream_id) {
++  if (nghttp3_conn_unblock_stream(conn_, stream_id) != 0) {
++    return -1;
++  }
++
++  return 0;
++}
++
++void Http3Session::shutdown_stream_write(int64_t stream_id) {
++  nghttp3_conn_shutdown_stream_write(conn_, stream_id);
++}
++
++int Http3Session::add_write_offset(int64_t stream_id, size_t ndatalen) {
++  auto rv = nghttp3_conn_add_write_offset(conn_, stream_id, ndatalen);
++  if (rv != 0) {
++    ngtcp2_ccerr_set_application_error(
++        &client_->quic.last_error, nghttp3_err_infer_quic_app_error_code(rv),
++        nullptr, 0);
++    return -1;
++  }
++  return 0;
++}
++
++int Http3Session::add_ack_offset(int64_t stream_id, size_t datalen) {
++  auto rv = nghttp3_conn_add_ack_offset(conn_, stream_id, datalen);
++  if (rv != 0) {
++    ngtcp2_ccerr_set_application_error(
++        &client_->quic.last_error, nghttp3_err_infer_quic_app_error_code(rv),
++        nullptr, 0);
++    return -1;
++  }
++  return 0;
++}
++
++} // namespace h2load
+diff --git a/src/h2load_http3_session_verto.h b/src/h2load_http3_session_verto.h
+new file mode 100644
+index 0000000..72e8c20
+--- /dev/null
++++ b/src/h2load_http3_session_verto.h
+@@ -0,0 +1,83 @@
++ /*
++ * nghttp2 - HTTP/2 C Library
++ *
++ * Copyright (c) 2019 nghttp2 contributors
++ *
++ * Permission is hereby granted, free of charge, to any person obtaining
++ * a copy of this software and associated documentation files (the
++ * "Software"), to deal in the Software without restriction, including
++ * without limitation the rights to use, copy, modify, merge, publish,
++ * distribute, sublicense, and/or sell copies of the Software, and to
++ * permit persons to whom the Software is furnished to do so, subject to
++ * the following conditions:
++ *
++ * The above copyright notice and this permission notice shall be
++ * included in all copies or substantial portions of the Software.
++ *
++ * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND,
++ * EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF
++ * MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND
++ * NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE
++ * LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION
++ * OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION
++ * WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
++ */
++#ifndef H2LOAD_HTTP3_SESSION_H
++#define H2LOAD_HTTP3_SESSION_H
++
++#include "h2load_session_verto.h"
++
++#include <nghttp3/nghttp3.h>
++
++namespace h2load {
++
++struct Client;
++
++class Http3Session : public Session {
++public:
++  Http3Session(Client *client);
++  virtual ~Http3Session();
++  virtual void on_connect();
++  virtual int submit_request();
++  virtual int on_read(const uint8_t *data, size_t len);
++  virtual int on_write();
++  virtual void terminate();
++  virtual size_t max_concurrent_streams();
++
++  int init_conn();
++  int stream_close(int64_t stream_id, uint64_t app_error_code);
++  void recv_data(int64_t stream_id, const uint8_t *data, size_t datalen);
++  void consume(int64_t stream_id, size_t nconsumed);
++  void begin_headers(int64_t stream_id);
++  void recv_header(int64_t stream_id, const nghttp3_vec *name,
++                   const nghttp3_vec *value);
++  int stop_sending(int64_t stream_id, uint64_t app_error_code);
++  int reset_stream(int64_t stream_id, uint64_t app_error_code);
++
++  int close_stream(int64_t stream_id, uint64_t app_error_code);
++  int shutdown_stream_read(int64_t stream_id);
++  int extend_max_local_streams();
++  int64_t submit_request_internal();
++
++  ssize_t read_stream(uint32_t flags, int64_t stream_id, const uint8_t *data,
++                      size_t datalen);
++  ssize_t write_stream(int64_t &stream_id, int &fin, nghttp3_vec *vec,
++                       size_t veccnt);
++  void block_stream(int64_t stream_id);
++  int unblock_stream(int64_t stream_id);
++  void shutdown_stream_write(int64_t stream_id);
++  int add_write_offset(int64_t stream_id, size_t ndatalen);
++  int add_ack_offset(int64_t stream_id, size_t datalen);
++
++  void read_data(nghttp3_vec *vec, size_t veccnt, uint32_t *pflags);
++
++private:
++  Client *client_;
++  nghttp3_conn *conn_;
++  size_t npending_request_;
++  size_t reqidx_;
++};
++
++} // namespace h2load
++
++#endif // H2LOAD_HTTP3_SESSION_H
+diff --git a/src/h2load_quic_verto.cc b/src/h2load_quic_verto.cc
+new file mode 100644
+index 0000000..865d871
+--- /dev/null
++++ b/src/h2load_quic_verto.cc
+@@ -0,0 +1,838 @@
++ /*
++ * nghttp2 - HTTP/2 C Library
++ *
++ * Copyright (c) 2019 nghttp2 contributors
++ *
++ * Permission is hereby granted, free of charge, to any person obtaining
++ * a copy of this software and associated documentation files (the
++ * "Software"), to deal in the Software without restriction, including
++ * without limitation the rights to use, copy, modify, merge, publish,
++ * distribute, sublicense, and/or sell copies of the Software, and to
++ * permit persons to whom the Software is furnished to do so, subject to
++ * the following conditions:
++ *
++ * The above copyright notice and this permission notice shall be
++ * included in all copies or substantial portions of the Software.
++ *
++ * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND,
++ * EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF
++ * MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND
++ * NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE
++ * LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION
++ * OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION
++ * WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
++ */
++#include "h2load_quic_verto.h"
++
++#include <netinet/udp.h>
++
++#include <iostream>
++
++#ifdef HAVE_LIBNGTCP2_CRYPTO_QUICTLS
++#  include <ngtcp2/ngtcp2_crypto_quictls.h>
++#endif // HAVE_LIBNGTCP2_CRYPTO_QUICTLS
++#ifdef HAVE_LIBNGTCP2_CRYPTO_BORINGSSL
++#  include <ngtcp2/ngtcp2_crypto_boringssl.h>
++#endif // HAVE_LIBNGTCP2_CRYPTO_BORINGSSL
++
++#include <openssl/err.h>
++#include <openssl/rand.h>
++
++#include "h2load_http3_session_verto.h"
++
++namespace h2load {
++
++namespace {
++int handshake_completed(ngtcp2_conn *conn, void *user_data) {
++  auto c = static_cast<Client *>(user_data);
++
++  if (c->quic_handshake_completed() != 0) {
++    return NGTCP2_ERR_CALLBACK_FAILURE;
++  }
++
++  return 0;
++}
++} // namespace
++
++int Client::quic_handshake_completed() { return connection_made(); }
++
++namespace {
++int recv_stream_data(ngtcp2_conn *conn, uint32_t flags, int64_t stream_id,
++                     uint64_t offset, const uint8_t *data, size_t datalen,
++                     void *user_data, void *stream_user_data) {
++  auto c = static_cast<Client *>(user_data);
++  if (c->quic_recv_stream_data(flags, stream_id, data, datalen) != 0) {
++    // TODO Better to do this gracefully rather than
++    // NGTCP2_ERR_CALLBACK_FAILURE.  Perhaps, call
++    // ngtcp2_conn_write_application_close() ?
++    return NGTCP2_ERR_CALLBACK_FAILURE;
++  }
++  return 0;
++}
++} // namespace
++
++int Client::quic_recv_stream_data(uint32_t flags, int64_t stream_id,
++                                  const uint8_t *data, size_t datalen) {
++  if (worker->current_phase == Phase::MAIN_DURATION) {
++    worker->stats.bytes_total += datalen;
++  }
++
++  auto s = static_cast<Http3Session *>(session.get());
++  auto nconsumed = s->read_stream(flags, stream_id, data, datalen);
++  if (nconsumed == -1) {
++    return -1;
++  }
++
++  ngtcp2_conn_extend_max_stream_offset(quic.conn, stream_id, nconsumed);
++  ngtcp2_conn_extend_max_offset(quic.conn, nconsumed);
++
++  return 0;
++}
++
++namespace {
++int acked_stream_data_offset(ngtcp2_conn *conn, int64_t stream_id,
++                             uint64_t offset, uint64_t datalen, void *user_data,
++                             void *stream_user_data) {
++  auto c = static_cast<Client *>(user_data);
++  if (c->quic_acked_stream_data_offset(stream_id, datalen) != 0) {
++    return NGTCP2_ERR_CALLBACK_FAILURE;
++  }
++  return 0;
++}
++} // namespace
++
++int Client::quic_acked_stream_data_offset(int64_t stream_id, size_t datalen) {
++  auto s = static_cast<Http3Session *>(session.get());
++  if (s->add_ack_offset(stream_id, datalen) != 0) {
++    return -1;
++  }
++  return 0;
++}
++
++namespace {
++int stream_close(ngtcp2_conn *conn, uint32_t flags, int64_t stream_id,
++                 uint64_t app_error_code, void *user_data,
++                 void *stream_user_data) {
++  auto c = static_cast<Client *>(user_data);
++
++  if (!(flags & NGTCP2_STREAM_CLOSE_FLAG_APP_ERROR_CODE_SET)) {
++    app_error_code = NGHTTP3_H3_NO_ERROR;
++  }
++
++  if (c->quic_stream_close(stream_id, app_error_code) != 0) {
++    return NGTCP2_ERR_CALLBACK_FAILURE;
++  }
++  return 0;
++}
++} // namespace
++
++int Client::quic_stream_close(int64_t stream_id, uint64_t app_error_code) {
++  auto s = static_cast<Http3Session *>(session.get());
++  if (s->close_stream(stream_id, app_error_code) != 0) {
++    return -1;
++  }
++  return 0;
++}
++
++namespace {
++int stream_reset(ngtcp2_conn *conn, int64_t stream_id, uint64_t final_size,
++                 uint64_t app_error_code, void *user_data,
++                 void *stream_user_data) {
++  auto c = static_cast<Client *>(user_data);
++  if (c->quic_stream_reset(stream_id, app_error_code) != 0) {
++    return NGTCP2_ERR_CALLBACK_FAILURE;
++  }
++  return 0;
++}
++} // namespace
++
++int Client::quic_stream_reset(int64_t stream_id, uint64_t app_error_code) {
++  auto s = static_cast<Http3Session *>(session.get());
++  if (s->shutdown_stream_read(stream_id) != 0) {
++    return -1;
++  }
++  return 0;
++}
++
++namespace {
++int stream_stop_sending(ngtcp2_conn *conn, int64_t stream_id,
++                        uint64_t app_error_code, void *user_data,
++                        void *stream_user_data) {
++  auto c = static_cast<Client *>(user_data);
++  if (c->quic_stream_stop_sending(stream_id, app_error_code) != 0) {
++    return NGTCP2_ERR_CALLBACK_FAILURE;
++  }
++  return 0;
++}
++} // namespace
++
++int Client::quic_stream_stop_sending(int64_t stream_id,
++                                     uint64_t app_error_code) {
++  auto s = static_cast<Http3Session *>(session.get());
++  if (s->shutdown_stream_read(stream_id) != 0) {
++    return -1;
++  }
++  return 0;
++}
++
++namespace {
++int extend_max_local_streams_bidi(ngtcp2_conn *conn, uint64_t max_streams,
++                                  void *user_data) {
++  auto c = static_cast<Client *>(user_data);
++
++  if (c->quic_extend_max_local_streams() != 0) {
++    return NGTCP2_ERR_CALLBACK_FAILURE;
++  }
++
++  return 0;
++}
++} // namespace
++
++int Client::quic_extend_max_local_streams() {
++  auto s = static_cast<Http3Session *>(session.get());
++  if (s->extend_max_local_streams() != 0) {
++    return NGTCP2_ERR_CALLBACK_FAILURE;
++  }
++  return 0;
++}
++
++namespace {
++int extend_max_stream_data(ngtcp2_conn *conn, int64_t stream_id,
++                           uint64_t max_data, void *user_data,
++                           void *stream_user_data) {
++  auto c = static_cast<Client *>(user_data);
++
++  if (c->quic_extend_max_stream_data(stream_id) != 0) {
++    return NGTCP2_ERR_CALLBACK_FAILURE;
++  }
++
++  return 0;
++}
++} // namespace
++
++int Client::quic_extend_max_stream_data(int64_t stream_id) {
++  auto s = static_cast<Http3Session *>(session.get());
++  if (s->unblock_stream(stream_id) != 0) {
++    return -1;
++  }
++  return 0;
++}
++
++namespace {
++int get_new_connection_id(ngtcp2_conn *conn, ngtcp2_cid *cid, uint8_t *token,
++                          size_t cidlen, void *user_data) {
++  if (RAND_bytes(cid->data, cidlen) != 1) {
++    return NGTCP2_ERR_CALLBACK_FAILURE;
++  }
++
++  cid->datalen = cidlen;
++
++  if (RAND_bytes(token, NGTCP2_STATELESS_RESET_TOKENLEN) != 1) {
++    return NGTCP2_ERR_CALLBACK_FAILURE;
++  }
++
++  return 0;
++}
++} // namespace
++
++namespace {
++void debug_log_printf(void *user_data, const char *fmt, ...) {
++  va_list ap;
++
++  va_start(ap, fmt);
++  vfprintf(stderr, fmt, ap);
++  va_end(ap);
++
++  fprintf(stderr, "\n");
++}
++} // namespace
++
++namespace {
++int generate_cid(ngtcp2_cid &dest) {
++  dest.datalen = 8;
++
++  if (RAND_bytes(dest.data, dest.datalen) != 1) {
++    return -1;
++  }
++
++  return 0;
++}
++} // namespace
++
++namespace {
++ngtcp2_tstamp quic_timestamp() {
++  return std::chrono::duration_cast<std::chrono::nanoseconds>(
++             std::chrono::steady_clock::now().time_since_epoch())
++      .count();
++}
++} // namespace
++
++// qlog write callback -- excerpted from ngtcp2/examples/client_base.cc
++namespace {
++void qlog_write_cb(void *user_data, uint32_t flags, const void *data,
++                   size_t datalen) {
++  auto c = static_cast<Client *>(user_data);
++  c->quic_write_qlog(data, datalen);
++}
++} // namespace
++
++void Client::quic_write_qlog(const void *data, size_t datalen) {
++  assert(quic.qlog_file != nullptr);
++  fwrite(data, 1, datalen, quic.qlog_file);
++}
++
++namespace {
++void rand(uint8_t *dest, size_t destlen, const ngtcp2_rand_ctx *rand_ctx) {
++  util::random_bytes(dest, dest + destlen,
++                     *static_cast<std::mt19937 *>(rand_ctx->native_handle));
++}
++} // namespace
++
++namespace {
++int recv_rx_key(ngtcp2_conn *conn, ngtcp2_encryption_level level,
++                void *user_data) {
++  if (level != NGTCP2_ENCRYPTION_LEVEL_1RTT) {
++    return 0;
++  }
++
++  auto c = static_cast<Client *>(user_data);
++
++  if (c->quic_make_http3_session() != 0) {
++    return NGTCP2_ERR_CALLBACK_FAILURE;
++  }
++
++  return 0;
++}
++} // namespace
++
++int Client::quic_make_http3_session() {
++  auto s = std::make_unique<Http3Session>(this);
++  if (s->init_conn() == -1) {
++    return -1;
++  }
++  session = std::move(s);
++
++  return 0;
++}
++
++namespace {
++ngtcp2_conn *get_conn(ngtcp2_crypto_conn_ref *conn_ref) {
++  auto c = static_cast<Client *>(conn_ref->user_data);
++  return c->quic.conn;
++}
++} // namespace
++
++int Client::quic_init(const sockaddr *local_addr, socklen_t local_addrlen,
++                      const sockaddr *remote_addr, socklen_t remote_addrlen) {
++  int rv;
++
++  if (!ssl) {
++    ssl = SSL_new(worker->ssl_ctx);
++
++    quic.conn_ref.get_conn = get_conn;
++    quic.conn_ref.user_data = this;
++
++    SSL_set_app_data(ssl, &quic.conn_ref);
++    SSL_set_connect_state(ssl);
++    SSL_set_quic_use_legacy_codepoint(ssl, 0);
++  }
++
++  auto callbacks = ngtcp2_callbacks{
++      ngtcp2_crypto_client_initial_cb,
++      nullptr, // recv_client_initial
++      ngtcp2_crypto_recv_crypto_data_cb,
++      h2load::handshake_completed,
++      nullptr, // recv_version_negotiation
++      ngtcp2_crypto_encrypt_cb,
++      ngtcp2_crypto_decrypt_cb,
++      ngtcp2_crypto_hp_mask_cb,
++      h2load::recv_stream_data,
++      h2load::acked_stream_data_offset,
++      nullptr, // stream_open
++      h2load::stream_close,
++      nullptr, // recv_stateless_reset
++      ngtcp2_crypto_recv_retry_cb,
++      h2load::extend_max_local_streams_bidi,
++      nullptr, // extend_max_local_streams_uni
++      h2load::rand,
++      get_new_connection_id,
++      nullptr, // remove_connection_id
++      ngtcp2_crypto_update_key_cb,
++      nullptr, // path_validation
++      nullptr, // select_preferred_addr
++      h2load::stream_reset,
++      nullptr, // extend_max_remote_streams_bidi
++      nullptr, // extend_max_remote_streams_uni
++      h2load::extend_max_stream_data,
++      nullptr, // dcid_status
++      nullptr, // handshake_confirmed
++      nullptr, // recv_new_token
++      ngtcp2_crypto_delete_crypto_aead_ctx_cb,
++      ngtcp2_crypto_delete_crypto_cipher_ctx_cb,
++      nullptr, // recv_datagram
++      nullptr, // ack_datagram
++      nullptr, // lost_datagram
++      ngtcp2_crypto_get_path_challenge_data_cb,
++      h2load::stream_stop_sending,
++      nullptr, // version_negotiation
++      h2load::recv_rx_key,
++      nullptr, // recv_tx_key
++  };
++
++  ngtcp2_cid scid, dcid;
++  if (generate_cid(scid) != 0) {
++    return -1;
++  }
++  if (generate_cid(dcid) != 0) {
++    return -1;
++  }
++
++  auto config = worker->config;
++
++  ngtcp2_settings settings;
++  ngtcp2_settings_default(&settings);
++  if (config->verbose) {
++    settings.log_printf = debug_log_printf;
++  }
++  settings.initial_ts = quic_timestamp();
++  settings.rand_ctx.native_handle = &worker->randgen;
++  if (!config->qlog_file_base.empty()) {
++    assert(quic.qlog_file == nullptr);
++    auto path = config->qlog_file_base;
++    path += '.';
++    path += util::utos(worker->id);
++    path += '.';
++    path += util::utos(id);
++    path += ".sqlog";
++    quic.qlog_file = fopen(path.c_str(), "w");
++    if (quic.qlog_file == nullptr) {
++      std::cerr << "Failed to open a qlog file: " << path << std::endl;
++      return -1;
++    }
++    settings.qlog_write = qlog_write_cb;
++  }
++  if (config->max_udp_payload_size) {
++    settings.max_tx_udp_payload_size = config->max_udp_payload_size;
++    settings.no_tx_udp_payload_size_shaping = 1;
++  }
++
++  ngtcp2_transport_params params;
++  ngtcp2_transport_params_default(&params);
++  auto max_stream_data =
++      std::min((1 << 26) - 1, (1 << config->window_bits) - 1);
++  params.initial_max_stream_data_bidi_local = max_stream_data;
++  params.initial_max_stream_data_uni = max_stream_data;
++  params.initial_max_data = (1 << config->connection_window_bits) - 1;
++  params.initial_max_streams_bidi = 0;
++  params.initial_max_streams_uni = 100;
++  params.max_idle_timeout = 30 * NGTCP2_SECONDS;
++
++  auto path = ngtcp2_path{
++      {
++          const_cast<sockaddr *>(local_addr),
++          local_addrlen,
++      },
++      {
++          const_cast<sockaddr *>(remote_addr),
++          remote_addrlen,
++      },
++  };
++
++  assert(config->npn_list.size());
++
++  uint32_t quic_version;
++
++  if (config->npn_list[0] == NGHTTP3_ALPN_H3) {
++    quic_version = NGTCP2_PROTO_VER_V1;
++  } else {
++    quic_version = NGTCP2_PROTO_VER_MIN;
++  }
++
++  rv = ngtcp2_conn_client_new(&quic.conn, &dcid, &scid, &path, quic_version,
++                              &callbacks, &settings, &params, nullptr, this);
++  if (rv != 0) {
++    return -1;
++  }
++
++  ngtcp2_conn_set_tls_native_handle(quic.conn, ssl);
++
++  return 0;
++}
++
++void Client::quic_free() {
++  ngtcp2_conn_del(quic.conn);
++  if (quic.qlog_file != nullptr) {
++    fclose(quic.qlog_file);
++    quic.qlog_file = nullptr;
++  }
++}
++
++void Client::quic_close_connection() {
++  if (!quic.conn) {
++    return;
++  }
++
++  std::array<uint8_t, NGTCP2_MAX_UDP_PAYLOAD_SIZE> buf;
++  ngtcp2_path_storage ps;
++  ngtcp2_path_storage_zero(&ps);
++
++  auto nwrite = ngtcp2_conn_write_connection_close(
++      quic.conn, &ps.path, nullptr, buf.data(), buf.size(), &quic.last_error,
++      quic_timestamp());
++
++  if (nwrite <= 0) {
++    return;
++  }
++
++  write_udp(reinterpret_cast<sockaddr *>(ps.path.remote.addr),
++            ps.path.remote.addrlen, buf.data(), nwrite, 0);
++}
++
++int Client::quic_write_client_handshake(ngtcp2_encryption_level level,
++                                        const uint8_t *data, size_t datalen) {
++  int rv;
++
++  assert(level < 2);
++
++  rv = ngtcp2_conn_submit_crypto_data(quic.conn, level, data, datalen);
++  if (rv != 0) {
++    std::cerr << "ngtcp2_conn_submit_crypto_data: " << ngtcp2_strerror(rv)
++              << std::endl;
++    return -1;
++  }
++
++  return 0;
++}
++
++void verto_quic_pkt_timeout_cb(verto_ctx *verto_loop, verto_ev *ev) {
++  auto c = static_cast<Client *>(verto_get_private(ev));
++
++  if (c->quic_pkt_timeout() != 0) {
++    c->fail();
++    c->worker->free_client(c);
++    delete c;
++    return;
++  }
++}
++
++int Client::quic_pkt_timeout() {
++  int rv;
++  auto now = quic_timestamp();
++
++  rv = ngtcp2_conn_handle_expiry(quic.conn, now);
++  if (rv != 0) {
++    ngtcp2_ccerr_set_liberr(&quic.last_error, rv, nullptr, 0);
++    return -1;
++  }
++
++  return write_quic();
++}
++
++void Client::quic_restart_pkt_timer() {
++  auto expiry = ngtcp2_conn_get_expiry(quic.conn);
++  auto now = quic_timestamp();
++  auto t = expiry > now ? static_cast<double>(expiry - now) / NGTCP2_SECONDS
++                        : 1e-9;
++  // quic.pkt_timer.repeat = t;
++  // ev_timer_again(worker->loop, &quic.pkt_timer);
++}
++
++int Client::read_quic() {
++  std::array<uint8_t, 65535> buf;
++  sockaddr_union su;
++  int rv;
++  size_t pktcnt = 0;
++  ngtcp2_pkt_info pi{};
++
++  iovec msg_iov;
++  msg_iov.iov_base = buf.data();
++  msg_iov.iov_len = buf.size();
++
++  msghdr msg{};
++  msg.msg_name = &su;
++  msg.msg_iov = &msg_iov;
++  msg.msg_iovlen = 1;
++
++  uint8_t msg_ctrl[CMSG_SPACE(sizeof(uint16_t))];
++  msg.msg_control = msg_ctrl;
++
++  auto ts = quic_timestamp();
++
++  for (;;) {
++    msg.msg_namelen = sizeof(su);
++    msg.msg_controllen = sizeof(msg_ctrl);
++
++    auto nread = recvmsg(fd, &msg, 0);
++    if (nread == -1) {
++      return 0;
++    }
++
++    auto gso_size = util::msghdr_get_udp_gro(&msg);
++    if (gso_size == 0) {
++      gso_size = static_cast<size_t>(nread);
++    }
++
++    assert(quic.conn);
++
++    ++worker->stats.udp_dgram_recv;
++
++    auto path = ngtcp2_path{
++        {
++            &local_addr.su.sa,
++            static_cast<socklen_t>(local_addr.len),
++        },
++        {
++            &su.sa,
++            msg.msg_namelen,
++        },
++    };
++
++    auto data = buf.data();
++
++    for (;;) {
++      auto datalen = std::min(static_cast<size_t>(nread), gso_size);
++
++      ++pktcnt;
++
++      rv = ngtcp2_conn_read_pkt(quic.conn, &path, &pi, data, datalen, ts);
++      if (rv != 0) {
++        if (!quic.last_error.error_code) {
++          if (rv == NGTCP2_ERR_CRYPTO) {
++            ngtcp2_ccerr_set_tls_alert(&quic.last_error,
++                                       ngtcp2_conn_get_tls_alert(quic.conn),
++                                       nullptr, 0);
++          } else {
++            ngtcp2_ccerr_set_liberr(&quic.last_error, rv, nullptr, 0);
++          }
++        }
++
++        return -1;
++      }
++
++      nread -= datalen;
++      if (nread == 0) {
++        break;
++      }
++
++      data += datalen;
++    }
++
++    if (pktcnt >= 100) {
++      break;
++    }
++  }
++
++  return 0;
++}
++
++int Client::write_quic() {
++  int rv;
++
++  //ev_io_stop(worker->loop, &wev);
++
++  if (quic.close_requested) {
++    return -1;
++  }
++
++  if (quic.tx.send_blocked) {
++    rv = send_blocked_packet();
++    if (rv != 0) {
++      return -1;
++    }
++
++    if (quic.tx.send_blocked) {
++      return 0;
++    }
++  }
++
++  std::array<nghttp3_vec, 16> vec;
++  size_t pktcnt = 0;
++  auto max_udp_payload_size =
++      ngtcp2_conn_get_max_tx_udp_payload_size(quic.conn);
++#ifdef UDP_SEGMENT
++  auto path_max_udp_payload_size =
++      ngtcp2_conn_get_path_max_tx_udp_payload_size(quic.conn);
++#endif // UDP_SEGMENT
++  auto max_pktcnt =
++      ngtcp2_conn_get_send_quantum(quic.conn) / max_udp_payload_size;
++  uint8_t *bufpos = quic.tx.data.get();
++  ngtcp2_path_storage ps;
++  size_t gso_size = 0;
++
++  ngtcp2_path_storage_zero(&ps);
++
++  auto s = static_cast<Http3Session *>(session.get());
++  auto ts = quic_timestamp();
++
++  for (;;) {
++    int64_t stream_id = -1;
++    int fin = 0;
++    ssize_t sveccnt = 0;
++
++    if (session && ngtcp2_conn_get_max_data_left(quic.conn)) {
++      sveccnt = s->write_stream(stream_id, fin, vec.data(), vec.size());
++      if (sveccnt == -1) {
++        return -1;
++      }
++    }
++
++    ngtcp2_ssize ndatalen;
++    auto v = vec.data();
++    auto vcnt = static_cast<size_t>(sveccnt);
++
++    uint32_t flags = NGTCP2_WRITE_STREAM_FLAG_MORE;
++    if (fin) {
++      flags |= NGTCP2_WRITE_STREAM_FLAG_FIN;
++    }
++
++    auto nwrite = ngtcp2_conn_writev_stream(
++        quic.conn, &ps.path, nullptr, bufpos, max_udp_payload_size, &ndatalen,
++        flags, stream_id, reinterpret_cast<const ngtcp2_vec *>(v), vcnt, ts);
++    if (nwrite < 0) {
++      switch (nwrite) {
++      case NGTCP2_ERR_STREAM_DATA_BLOCKED:
++        assert(ndatalen == -1);
++        s->block_stream(stream_id);
++        continue;
++      case NGTCP2_ERR_STREAM_SHUT_WR:
++        assert(ndatalen == -1);
++        s->shutdown_stream_write(stream_id);
++        continue;
++      case NGTCP2_ERR_WRITE_MORE:
++        assert(ndatalen >= 0);
++        if (s->add_write_offset(stream_id, ndatalen) != 0) {
++          return -1;
++        }
++        continue;
++      }
++
++      ngtcp2_ccerr_set_liberr(&quic.last_error, nwrite, nullptr, 0);
++      return -1;
++    } else if (ndatalen >= 0 && s->add_write_offset(stream_id, ndatalen) != 0) {
++      return -1;
++    }
++
++    quic_restart_pkt_timer();
++
++    if (nwrite == 0) {
++      if (bufpos - quic.tx.data.get()) {
++        auto data = quic.tx.data.get();
++        auto datalen = bufpos - quic.tx.data.get();
++        rv = write_udp(ps.path.remote.addr, ps.path.remote.addrlen, data,
++                       datalen, gso_size);
++        if (rv == 1) {
++          on_send_blocked(ps.path.remote, data, datalen, gso_size);
++          return 0;
++        }
++      }
++      return 0;
++    }
++
++    bufpos += nwrite;
++
++#ifdef UDP_SEGMENT
++    if (worker->config->no_udp_gso) {
++#endif // UDP_SEGMENT
++      auto data = quic.tx.data.get();
++      auto datalen = bufpos - quic.tx.data.get();
++      rv = write_udp(ps.path.remote.addr, ps.path.remote.addrlen, data, datalen,
++                     0);
++      if (rv == 1) {
++        on_send_blocked(ps.path.remote, data, datalen, 0);
++        return 0;
++      }
++
++      if (++pktcnt == max_pktcnt) {
++        return 0;
++      }
++
++      bufpos = quic.tx.data.get();
++
++#ifdef UDP_SEGMENT
++      continue;
++    }
++#endif // UDP_SEGMENT
++
++#ifdef UDP_SEGMENT
++    if (pktcnt == 0) {
++      gso_size = nwrite;
++    } else if (static_cast<size_t>(nwrite) > gso_size ||
++               (gso_size > path_max_udp_payload_size &&
++                static_cast<size_t>(nwrite) != gso_size)) {
++      auto data = quic.tx.data.get();
++      auto datalen = bufpos - quic.tx.data.get() - nwrite;
++      rv = write_udp(ps.path.remote.addr, ps.path.remote.addrlen, data, datalen,
++                     gso_size);
++      if (rv == 1) {
++        on_send_blocked(ps.path.remote, data, datalen, gso_size);
++        on_send_blocked(ps.path.remote, bufpos - nwrite, nwrite, 0);
++      } else {
++        auto data = bufpos - nwrite;
++        rv = write_udp(ps.path.remote.addr, ps.path.remote.addrlen, data,
++                       nwrite, 0);
++        if (rv == 1) {
++          on_send_blocked(ps.path.remote, data, nwrite, 0);
++        }
++      }
++
++      return 0;
++    }
++
++    // Assume that the path does not change.
++    if (++pktcnt == max_pktcnt || static_cast<size_t>(nwrite) < gso_size) {
++      auto data = quic.tx.data.get();
++      auto datalen = bufpos - quic.tx.data.get();
++      rv = write_udp(ps.path.remote.addr, ps.path.remote.addrlen, data, datalen,
++                     gso_size);
++      if (rv == 1) {
++        on_send_blocked(ps.path.remote, data, datalen, gso_size);
++      }
++      return 0;
++    }
++#endif // UDP_SEGMENT
++  }
++}
++
++void Client::on_send_blocked(const ngtcp2_addr &remote_addr,
++                             const uint8_t *data, size_t datalen,
++                             size_t gso_size) {
++  assert(quic.tx.num_blocked || !quic.tx.send_blocked);
++  assert(quic.tx.num_blocked < 2);
++
++  quic.tx.send_blocked = true;
++
++  auto &p = quic.tx.blocked[quic.tx.num_blocked++];
++
++  memcpy(&p.remote_addr.su, remote_addr.addr, remote_addr.addrlen);
++
++  p.remote_addr.len = remote_addr.addrlen;
++  p.data = data;
++  p.datalen = datalen;
++  p.gso_size = gso_size;
++}
++
++int Client::send_blocked_packet() {
++  int rv;
++
++  assert(quic.tx.send_blocked);
++
++  for (; quic.tx.num_blocked_sent < quic.tx.num_blocked;
++       ++quic.tx.num_blocked_sent) {
++    auto &p = quic.tx.blocked[quic.tx.num_blocked_sent];
++
++    rv = write_udp(&p.remote_addr.su.sa, p.remote_addr.len, p.data, p.datalen,
++                   p.gso_size);
++    if (rv == 1) {
++      return 0;
++    }
++  }
++
++  quic.tx.send_blocked = false;
++  quic.tx.num_blocked = 0;
++  quic.tx.num_blocked_sent = 0;
++
++  return 0;
++}
++
++} // namespace h2load
++
+diff --git a/src/h2load_quic_verto.h b/src/h2load_quic_verto.h
+new file mode 100644
+index 0000000..32cf1e3
+--- /dev/null
++++ b/src/h2load_quic_verto.h
+@@ -0,0 +1,36 @@
++ /*
++ * nghttp2 - HTTP/2 C Library
++ *
++ * Copyright (c) 2019 nghttp2 contributors
++ *
++ * Permission is hereby granted, free of charge, to any person obtaining
++ * a copy of this software and associated documentation files (the
++ * "Software"), to deal in the Software without restriction, including
++ * without limitation the rights to use, copy, modify, merge, publish,
++ * distribute, sublicense, and/or sell copies of the Software, and to
++ * permit persons to whom the Software is furnished to do so, subject to
++ * the following conditions:
++ *
++ * The above copyright notice and this permission notice shall be
++ * included in all copies or substantial portions of the Software.
++ *
++ * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND,
++ * EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF
++ * MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND
++ * NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE
++ * LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION
++ * OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION
++ * WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
++ */
++#ifndef H2LOAD_QUIC_H
++#define H2LOAD_QUIC_H
++
++#include "nghttp2_config.h"
++
++#include "h2load_verto.h"
++
++namespace h2load {
++void verto_quic_pkt_timeout_cb(verto_ctx *verto_loop, verto_ev *ev);
++} // namespace h2load
++
++#endif // H2LOAD_QUIC_H
+diff --git a/src/h2load_session_verto.h b/src/h2load_session_verto.h
+new file mode 100644
+index 0000000..083a360
+--- /dev/null
++++ b/src/h2load_session_verto.h
+@@ -0,0 +1,60 @@
++/*
++ * nghttp2 - HTTP/2 C Library
++ *
++ * Copyright (c) 2014 Tatsuhiro Tsujikawa
++ *
++ * Permission is hereby granted, free of charge, to any person obtaining
++ * a copy of this software and associated documentation files (the
++ * "Software"), to deal in the Software without restriction, including
++ * without limitation the rights to use, copy, modify, merge, publish,
++ * distribute, sublicense, and/or sell copies of the Software, and to
++ * permit persons to whom the Software is furnished to do so, subject to
++ * the following conditions:
++ *
++ * The above copyright notice and this permission notice shall be
++ * included in all copies or substantial portions of the Software.
++ *
++ * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND,
++ * EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF
++ * MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND
++ * NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE
++ * LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION
++ * OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION
++ * WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
++ */
++#ifndef H2LOAD_SESSION_H
++#define H2LOAD_SESSION_H
++
++#include "nghttp2_config.h"
++
++#include <sys/types.h>
++
++#include <cinttypes>
++
++#include "h2load_verto.h"
++
++namespace h2load {
++
++class Session {
++public:
++  virtual ~Session() {}
++  // Called when the connection was made.
++  virtual void on_connect() = 0;
++  // Called when one request must be issued.
++  virtual int submit_request() = 0;
++  // Called when incoming bytes are available. The subclass has to
++  // return the number of bytes read.
++  virtual int on_read(const uint8_t *data, size_t len) = 0;
++  // Called when write is available. Returns 0 on success, otherwise
++  // return -1.
++  virtual int on_write() = 0;
++  // Called when the underlying session must be terminated.
++  virtual void terminate() = 0;
++  // Return the maximum concurrency per connection
++  virtual size_t max_concurrent_streams() = 0;
++};
++
++} // namespace h2load
++
++#endif // H2LOAD_SESSION_H
++
+diff --git a/src/h2load_verto.cc b/src/h2load_verto.cc
+new file mode 100644
+index 0000000..51ca0d3
+--- /dev/null
++++ b/src/h2load_verto.cc
+@@ -0,0 +1,3277 @@
++/*
++ * nghttp2 - HTTP/2 C Library
++ *
++ * Copyright (c) 2014 Tatsuhiro Tsujikawa
++ *
++ * Permission is hereby granted, free of charge, to any person obtaining
++ * a copy of this software and associated documentation files (the
++ * "Software"), to deal in the Software without restriction, including
++ * without limitation the rights to use, copy, modify, merge, publish,
++ * distribute, sublicense, and/or sell copies of the Software, and to
++ * permit persons to whom the Software is furnished to do so, subject to
++ * the following conditions:
++ *
++ * The above copyright notice and this permission notice shall be
++ * included in all copies or substantial portions of the Software.
++ *
++ * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND,
++ * EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF
++ * MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND
++ * NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE
++ * LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION
++ * OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION
++ * WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
++ */
++#include "h2load_verto.h"
++
++#include <getopt.h>
++#include <signal.h>
++#ifdef HAVE_NETINET_IN_H
++#  include <netinet/in.h>
++#endif // HAVE_NETINET_IN_H
++#include <netinet/tcp.h>
++#include <sys/stat.h>
++#ifdef HAVE_FCNTL_H
++#  include <fcntl.h>
++#endif // HAVE_FCNTL_H
++#include <sys/mman.h>
++#include <netinet/udp.h>
++ 
++#include <cstdio>
++#include <cassert>
++#include <cstdlib>
++#include <iostream>
++#include <iomanip>
++#include <fstream>
++#include <chrono>
++#include <thread>
++#include <future>
++#include <random>
++
++#include <openssl/err.h>
++
++#ifdef ENABLE_HTTP3
++#  ifdef HAVE_LIBNGTCP2_CRYPTO_QUICTLS
++#    include <ngtcp2/ngtcp2_crypto_quictls.h>
++#  endif // HAVE_LIBNGTCP2_CRYPTO_QUICTLS
++#  ifdef HAVE_LIBNGTCP2_CRYPTO_BORINGSSL
++#    include <ngtcp2/ngtcp2_crypto_boringssl.h>
++#  endif // HAVE_LIBNGTCP2_CRYPTO_BORINGSSL
++#endif   // ENABLE_HTTP3
++
++#include "url-parser/url_parser.h"
++
++#include "h2load_http1_session_verto.h"
++#include "h2load_http2_session_verto.h"
++#ifdef ENABLE_HTTP3
++#  include "h2load_http3_session_verto.h"
++#  include "h2load_quic_verto.h"
++#endif // ENABLE_HTTP3
++#include "tls.h"
++#include "http2.h"
++#include "util.h"
++#include "template.h"
++
++#ifndef O_BINARY
++#  define O_BINARY (0)
++#endif // O_BINARY
++
++using namespace nghttp2;
++
++namespace h2load {
++
++namespace {
++bool recorded(const std::chrono::steady_clock::time_point &t) {
++  return std::chrono::steady_clock::duration::zero() != t.time_since_epoch();
++}
++} // namespace
++
++#if OPENSSL_1_1_1_API
++namespace {
++std::ofstream keylog_file;
++void keylog_callback(const SSL *ssl, const char *line) {
++  keylog_file.write(line, strlen(line));
++  keylog_file.put('\n');
++  keylog_file.flush();
++}
++} // namespace
++#endif // OPENSSL_1_1_1_API
++
++Config::Config()
++    : ciphers(tls::DEFAULT_CIPHER_LIST),
++      tls13_ciphers("TLS_AES_128_GCM_SHA256:TLS_AES_256_GCM_SHA384:TLS_"
++                    "CHACHA20_POLY1305_SHA256:TLS_AES_128_CCM_SHA256"),
++      groups("X25519:P-256:P-384:P-521"),
++      data_length(-1),
++      data(nullptr),
++      addrs(nullptr),
++      nreqs(1),
++      nclients(1),
++      nthreads(1),
++      max_concurrent_streams(1),
++      window_bits(30),
++      connection_window_bits(30),
++      max_frame_size(16_k),
++      rate(0),
++      rate_period(1.0),
++      duration(0.0),
++      warm_up_time(0.0),
++      conn_active_timeout(0.),
++      conn_inactivity_timeout(0.),
++      no_tls_proto(PROTO_HTTP2),
++      header_table_size(4_k),
++      encoder_header_table_size(4_k),
++      data_fd(-1),
++      log_fd(-1),
++      qlog_file_base(),
++      port(0),
++      default_port(0),
++      connect_to_port(0),
++      verbose(false),
++      timing_script(false),
++      base_uri_unix(false),
++      unix_addr{},
++      rps(0.),
++      no_udp_gso(false),
++      max_udp_payload_size(0),
++      ktls(false) {}
++
++Config::~Config() {
++  if (addrs) {
++    if (base_uri_unix) {
++      delete addrs;
++    } else {
++      freeaddrinfo(addrs);
++    }
++  }
++
++  if (data_fd != -1) {
++    close(data_fd);
++  }
++}
++
++bool Config::is_rate_mode() const { return (this->rate != 0); }
++bool Config::is_timing_based_mode() const { return (this->duration > 0); }
++bool Config::has_base_uri() const { return (!this->base_uri.empty()); }
++bool Config::rps_enabled() const { return this->rps > 0.0; }
++bool Config::is_quic() const {
++#ifdef ENABLE_HTTP3
++  return !npn_list.empty() &&
++         (npn_list[0] == NGHTTP3_ALPN_H3 || npn_list[0] == "\x5h3-29");
++#else  // !ENABLE_HTTP3
++  return false;
++#endif // !ENABLE_HTTP3
++}
++Config config;
++
++namespace {
++constexpr size_t MAX_SAMPLES = 1000000;
++} // namespace
++
++Stats::Stats(size_t req_todo, size_t nclients)
++    : req_todo(req_todo),
++      req_started(0),
++      req_done(0),
++      req_success(0),
++      req_status_success(0),
++      req_failed(0),
++      req_error(0),
++      req_timedout(0),
++      bytes_total(0),
++      bytes_head(0),
++      bytes_head_decomp(0),
++      bytes_body(0),
++      status(),
++      udp_dgram_recv(0),
++      udp_dgram_sent(0) {}
++
++Stream::Stream() : req_stat{}, status_success(-1) {}
++
++namespace {
++std::random_device rd;
++} // namespace
++
++namespace {
++std::mt19937 gen(rd());
++} // namespace
++
++namespace {
++void sampling_init(Sampling &smp, size_t max_samples) {
++  smp.n = 0;
++  smp.max_samples = max_samples;
++}
++} // namespace
++
++namespace {
++void verto_writecb(verto_ctx *verto_loop, verto_ev *ev) {
++  auto client = static_cast<Client *>(verto_get_private(ev));
++  client->restart_timeout();
++  auto rv = client->do_write();
++  if (rv == Client::ERR_CONNECT_FAIL) {
++    client->disconnect();
++    // Try next address
++    client->current_addr = nullptr;
++    rv = client->connect();
++    if (rv != 0) {
++      client->fail();
++      client->worker->free_client(client);
++      delete client;
++      return;
++    }
++    return;
++  }
++  if (rv != 0) {
++    client->fail();
++    client->worker->free_client(client);
++    delete client;
++  }
++}
++} // namespace
++
++namespace {
++void verto_readcb(verto_ctx *verto_loop, verto_ev *ev) {
++  auto client = static_cast<Client *>(verto_get_private(ev));
++
++  // In order to wait for the callback for the read event
++  // the write event observer was removed from the event loop in the previous step
++  // So now we need to add the read event observer into the event loop
++  verto_ev_flag write_flag = (verto_ev_flag)(VERTO_EV_FLAG_PERSIST | VERTO_EV_FLAG_IO_WRITE);
++  client->verto_wev = verto_add_io(client->worker->verto_loop, write_flag, verto_writecb, client->fd);
++  verto_set_private(client->verto_wev, client, NULL);
++
++  client->restart_timeout();
++  if (client->do_read() != 0) {
++    if (client->try_again_or_fail() == 0) {
++      return;
++    }
++    client->worker->free_client(client);
++    delete client;
++    return;
++  }
++} 
++} // namespace
++
++namespace {
++// Called every rate_period when rate mode is being used
++void verto_rate_period_timeout_w_cb(verto_ctx *verto_loop, verto_ev *ev) {
++  auto worker = static_cast<Worker *>(verto_get_private(ev));
++  auto nclients_per_second = worker->rate;
++  auto conns_remaining = worker->nclients - worker->nconns_made;
++  auto nclients = std::min(nclients_per_second, conns_remaining);
++
++  for (size_t i = 0; i < nclients; ++i) {
++    auto req_todo = worker->nreqs_per_client;
++    if (worker->nreqs_rem > 0) {
++      ++req_todo;
++      --worker->nreqs_rem;
++    }
++
++    verto_loop = verto_new(NULL, VERTO_EV_TYPE_NONE);
++    auto client =
++        std::make_unique<Client>(worker->next_client_id++, worker, req_todo);
++
++    ++worker->nconns_made;
++
++    if (client->connect() != 0) {
++      std::cerr << "client could not connect to host" << std::endl;
++      client->fail();
++    } else {
++      if (worker->config->is_timing_based_mode()) {
++        worker->clients.push_back(client.release());
++      } else {
++        client.release();
++      }
++    }
++    worker->report_rate_progress();
++    verto_run(verto_loop);
++    verto_free(verto_loop);
++  }
++  if (!worker->config->is_timing_based_mode()) {
++    if (worker->nconns_made >= worker->nclients) {
++      verto_del(ev);
++    }
++  } else {
++    // To check whether all created clients are pushed correctly
++    assert(worker->nclients == worker->clients.size());
++  }
++}
++} // namespace
++
++namespace {
++// Called when the duration for infinite number of requests are over
++void verto_duration_timeout_cb(verto_ctx *verto_loop, verto_ev *ev) {
++  auto worker = static_cast<Worker *>(verto_get_private(ev));
++
++  worker->current_phase = Phase::DURATION_OVER;
++
++  std::cout << "Main benchmark duration is over for thread #" << worker->id
++            << ". Stopping all clients." << std::endl;
++  worker->stop_all_clients();
++  std::cout << "Stopped all clients for thread #" << worker->id << std::endl;
++}
++} // namespace
++
++namespace {
++// Called when the warmup duration for infinite number of requests are over
++void verto_warmup_timeout_cb(verto_ctx *verto_loop, verto_ev *ev) {
++  auto worker = static_cast<Worker *>(verto_get_private(ev));
++
++  std::cout << "Warm-up phase is over for thread #" << worker->id << "."
++            << std::endl;
++  std::cout << "Main benchmark duration is started for thread #" << worker->id
++            << "." << std::endl;
++  assert(worker->stats.req_started == 0);
++  assert(worker->stats.req_done == 0);
++
++  for (auto client : worker->clients) {
++    if (client) {
++      assert(client->req_todo == 0);
++      assert(client->req_left == 1);
++      assert(client->req_inflight == 0);
++      assert(client->req_started == 0);
++      assert(client->req_done == 0);
++
++      client->record_client_start_time();
++      client->clear_connect_times();
++      client->record_connect_start_time();
++    }
++  }
++
++  worker->current_phase = Phase::MAIN_DURATION;
++
++  worker->verto_duration_watcher = verto_add_timeout(worker->verto_loop, VERTO_EV_FLAG_NONE, verto_duration_timeout_cb, worker->config->duration);
++  verto_set_private(worker->verto_duration_watcher, worker, NULL);
++}
++} // namespace
++
++namespace {
++void verto_rps_cb(verto_ctx *verto_loop, verto_ev *ev) {
++  auto client = static_cast<Client *>(verto_get_private(ev));
++  auto &session = client->session;
++
++  assert(!config.timing_script);
++
++  if (client->req_left == 0) {
++    verto_del(ev);
++    return;
++  }
++
++  auto now = std::chrono::steady_clock::now();
++  auto d = now - client->rps_duration_started;
++  auto n = static_cast<size_t>(
++      round(std::chrono::duration<double>(d).count() * config.rps));
++  client->rps_req_pending += n;
++  client->rps_duration_started +=
++      util::duration_from(static_cast<double>(n) / config.rps);
++
++  if (client->rps_req_pending == 0) {
++    return;
++  }
++
++  auto nreq = session->max_concurrent_streams() - client->rps_req_inflight;
++  if (nreq == 0) {
++    return;
++  }
++
++  nreq = config.is_timing_based_mode() ? std::max(nreq, client->req_left)
++                                       : std::min(nreq, client->req_left);
++  nreq = std::min(nreq, client->rps_req_pending);
++
++  client->rps_req_inflight += nreq;
++  client->rps_req_pending -= nreq;
++
++  for (; nreq > 0; --nreq) {
++    if (client->submit_request() != 0) {
++      client->process_request_failure();
++      break;
++    }
++  }
++}
++} // namespace
++
++namespace {
++// Called when an a connection has been inactive for a set period of time
++// or a fixed amount of time after all requests have been made on a
++// connection
++void verto_conn_timeout_cb(verto_ctx *verto_loop, verto_ev *ev) {
++  auto client = static_cast<Client *>(verto_get_private(ev));
++
++  verto_del(client->verto_conn_inactivity_watcher);
++  verto_del(client->verto_conn_active_watcher);
++
++  if (util::check_socket_connected(client->fd)) {
++    client->timeout();
++  }
++}
++} // namespace
++
++namespace {
++bool check_stop_client_request_timeout(Client *client, verto_ev *ev) {
++  if (client->req_left == 0) {
++    // no more requests to make, stop timer
++    verto_del(ev);
++    return true;
++  }
++
++  return false;
++}
++} // namespace
++
++namespace {
++void verto_client_request_timeout_cb(verto_ctx *verto_loop, verto_ev *ev) {
++  auto client = static_cast<Client *>(verto_get_private(ev));
++
++  if (client->streams.size() >= (size_t)config.max_concurrent_streams) {
++    verto_del(ev);
++    return;
++  }
++
++  if (client->submit_request() != 0) {
++    verto_del(ev);
++    client->process_request_failure();
++    return;
++  }
++
++  if (check_stop_client_request_timeout(client, ev)) {
++    return;
++  }
++
++  auto duration =
++      config.timings[client->reqidx] - config.timings[client->reqidx - 1];
++
++  while (duration < std::chrono::duration<double>(1e-9)) {
++    if (client->submit_request() != 0) {
++      verto_del(ev);
++      client->process_request_failure();
++      return;
++    }
++    client->signal_write();
++    if (check_stop_client_request_timeout(client, ev)) {
++      return;
++    }
++
++    duration =
++        config.timings[client->reqidx] - config.timings[client->reqidx - 1];
++  }
++
++  verto_del(ev);
++  client->verto_request_timeout_watcher = verto_add_timeout(client->worker->verto_loop, VERTO_EV_FLAG_PERSIST, verto_client_request_timeout_cb, util::ev_tstamp_from(duration) * 1000);
++  verto_set_private(client->verto_request_timeout_watcher, client, NULL);}
++} // namespace
++
++Client::Client(uint32_t id, Worker *worker, size_t req_todo)
++    : wb(&worker->mcpool),
++      cstat{},
++      worker(worker),
++      ssl(nullptr),
++#ifdef ENABLE_HTTP3
++      quic{},
++#endif // ENABLE_HTTP3
++      next_addr(config.addrs),
++      current_addr(nullptr),
++      reqidx(0),
++      state(CLIENT_IDLE),
++      req_todo(req_todo),
++      req_left(req_todo),
++      req_inflight(0),
++      req_started(0),
++      req_done(0),
++      id(id),
++      fd(-1),
++      local_addr{},
++      new_connection_requested(false),
++      final(false),
++      rps_req_pending(0),
++      rps_req_inflight(0) {
++  if (req_todo == 0) { // this means infinite number of requests are to be made
++    // This ensures that number of requests are unbounded
++    // Just a positive number is fine, we chose the first positive number
++    req_left = 1;
++  }
++
++#ifdef ENABLE_HTTP3
++  if (config.is_quic()) {
++    quic.tx.data = std::make_unique<uint8_t[]>(64_k);
++  }
++
++  ngtcp2_ccerr_default(&quic.last_error);
++#endif // ENABLE_HTTP3
++}
++
++Client::~Client() {
++  disconnect();
++
++#ifdef ENABLE_HTTP3
++  if (config.is_quic()) {
++    quic_free();
++  }
++#endif // ENABLE_HTTP3
++
++  if (ssl) {
++    SSL_free(ssl);
++  }
++
++  worker->sample_client_stat(&cstat);
++  ++worker->client_smp.n;
++}
++
++int Client::do_read() { return readfn(*this); }
++int Client::do_write() { return writefn(*this); }
++
++int Client::make_socket(addrinfo *addr) {
++  int rv;
++
++  if (config.is_quic()) {
++#ifdef ENABLE_HTTP3
++    fd = util::create_nonblock_udp_socket(addr->ai_family);
++    if (fd == -1) {
++      return -1;
++    }
++
++#  ifdef UDP_GRO
++    int val = 1;
++    if (setsockopt(fd, IPPROTO_UDP, UDP_GRO, &val, sizeof(val)) != 0) {
++      std::cerr << "setsockopt UDP_GRO failed" << std::endl;
++      return -1;
++    }
++#  endif // UDP_GRO
++
++    rv = util::bind_any_addr_udp(fd, addr->ai_family);
++    if (rv != 0) {
++      close(fd);
++      fd = -1;
++      return -1;
++    }
++
++    socklen_t addrlen = sizeof(local_addr.su.storage);
++    rv = getsockname(fd, &local_addr.su.sa, &addrlen);
++    if (rv == -1) {
++      return -1;
++    }
++    local_addr.len = addrlen;
++
++    if (quic_init(&local_addr.su.sa, local_addr.len, addr->ai_addr,
++                  addr->ai_addrlen) != 0) {
++      std::cerr << "quic_init failed" << std::endl;
++      return -1;
++    }
++#endif // ENABLE_HTTP3
++  } else {
++    fd = util::create_nonblock_socket(addr->ai_family);
++    if (fd == -1) {
++      return -1;
++    }
++    if (config.scheme == "https") {
++      if (!ssl) {
++        ssl = SSL_new(worker->ssl_ctx);
++      }
++
++      SSL_set_connect_state(ssl);
++    }
++  }
++
++  if (ssl && !util::numeric_host(config.host.c_str())) {
++    SSL_set_tlsext_host_name(ssl, config.host.c_str());
++  }
++
++  if (config.is_quic()) {
++    return 0;
++  }
++
++  rv = ::connect(fd, addr->ai_addr, addr->ai_addrlen);
++  if (rv != 0 && errno != EINPROGRESS) {
++    if (ssl) {
++      SSL_free(ssl);
++      ssl = nullptr;
++    }
++    close(fd);
++    fd = -1;
++    return -1;
++  }
++  return 0;
++}
++
++int Client::connect() {
++  int rv;
++
++  if (!worker->config->is_timing_based_mode() ||
++      worker->current_phase == Phase::MAIN_DURATION) {
++    record_client_start_time();
++    clear_connect_times();
++    record_connect_start_time();
++  } else if (worker->current_phase == Phase::INITIAL_IDLE) {
++    worker->current_phase = Phase::WARM_UP;
++    std::cout << "Warm-up started for thread #" << worker->id << "."
++              << std::endl;
++    worker->verto_warmup_watcher = verto_add_timeout(worker->verto_loop, VERTO_EV_FLAG_NONE, verto_warmup_timeout_cb, worker->config->warm_up_time);
++    verto_set_private(worker->verto_warmup_watcher, worker, NULL);
++  }
++
++  if (worker->config->conn_inactivity_timeout > 0.) {
++    verto_conn_inactivity_watcher = verto_add_timeout(worker->verto_loop, VERTO_EV_FLAG_PERSIST, verto_conn_timeout_cb, worker->config->conn_inactivity_timeout * 1000);
++    verto_set_private(verto_conn_inactivity_watcher, this, NULL);
++  }
++
++  if (current_addr) {
++    rv = make_socket(current_addr);
++    if (rv == -1) {
++      return -1;
++    }
++  } else {
++    addrinfo *addr = nullptr;
++    while (next_addr) {
++      addr = next_addr;
++      next_addr = next_addr->ai_next;
++      rv = make_socket(addr);
++      if (rv == 0) {
++        break;
++      }
++    }
++
++    if (fd == -1) {
++      return -1;
++    }
++
++    assert(addr);
++
++    current_addr = addr;
++  }
++
++  // Add read event observers and write event observers to the event loop
++  verto_ev_flag read_flag = (verto_ev_flag)(VERTO_EV_FLAG_PERSIST | VERTO_EV_FLAG_IO_READ);
++  verto_rev = verto_add_io(worker->verto_loop, read_flag, verto_readcb, fd);
++  verto_set_private(verto_rev, this, NULL);
++
++  verto_ev_flag write_flag = (verto_ev_flag)(VERTO_EV_FLAG_PERSIST | VERTO_EV_FLAG_IO_WRITE);
++  verto_wev = verto_add_io(worker->verto_loop, write_flag, verto_writecb, fd);
++  verto_set_private(verto_wev, this, NULL);
++
++  if (config.is_quic()) {
++#ifdef ENABLE_HTTP3
++    readfn = &Client::read_quic;
++    writefn = &Client::write_quic;
++#endif // ENABLE_HTTP3
++  } else {
++    writefn = &Client::connected;
++  }
++
++  return 0;
++}
++
++void Client::timeout() {
++  process_timedout_streams();
++
++  disconnect();
++}
++
++void Client::restart_timeout() {
++  if (worker->config->conn_inactivity_timeout > 0.) {
++    verto_conn_inactivity_watcher = verto_add_timeout(worker->verto_loop, VERTO_EV_FLAG_PERSIST, verto_conn_timeout_cb, worker->config->conn_inactivity_timeout * 1000);
++    verto_set_private(verto_conn_inactivity_watcher, this, NULL);
++  }
++}
++
++int Client::try_again_or_fail() {
++  disconnect();
++
++  if (new_connection_requested) {
++    new_connection_requested = false;
++
++    if (req_left) {
++
++      if (worker->current_phase == Phase::MAIN_DURATION) {
++        // At the moment, we don't have a facility to re-start request
++        // already in in-flight.  Make them fail.
++        worker->stats.req_failed += req_inflight;
++        worker->stats.req_error += req_inflight;
++
++        req_inflight = 0;
++      }
++
++      // Keep using current address
++      if (connect() == 0) {
++        return 0;
++      }
++      std::cerr << "client could not connect to host" << std::endl;
++    }
++  }
++
++  process_abandoned_streams();
++
++  return -1;
++}
++
++void Client::fail() {
++  disconnect();
++
++  process_abandoned_streams();
++}
++
++void Client::disconnect() {
++  record_client_end_time();
++
++#ifdef ENABLE_HTTP3
++  if (config.is_quic()) {
++    quic_close_connection();
++  }
++#endif // ENABLE_HTTP3
++  streams.clear();
++  session.reset();
++  wb.reset();
++  state = CLIENT_IDLE;
++  if (ssl) {
++    if (config.is_quic()) {
++      SSL_free(ssl);
++      ssl = nullptr;
++    } else {
++      SSL_set_shutdown(ssl, SSL_get_shutdown(ssl) | SSL_RECEIVED_SHUTDOWN);
++      ERR_clear_error();
++
++      if (SSL_shutdown(ssl) != 1) {
++        SSL_free(ssl);
++        ssl = nullptr;
++      }
++    }
++  }
++  if (fd != -1) {
++    shutdown(fd, SHUT_WR);
++    close(fd);
++    fd = -1;
++  }
++
++  final = false;
++  // Exit the event loop
++  verto_break(worker->verto_loop);
++}
++
++int Client::submit_request() {
++  if (session->submit_request() != 0) {
++    return -1;
++  }
++
++  if (worker->current_phase != Phase::MAIN_DURATION) {
++    return 0;
++  }
++
++  ++worker->stats.req_started;
++  ++req_started;
++  ++req_inflight;
++  if (!worker->config->is_timing_based_mode()) {
++    --req_left;
++  }
++  // if an active timeout is set and this is the last request to be submitted
++  // on this connection, start the active timeout.
++  if (worker->config->conn_active_timeout > 0. && req_left == 0) {
++    verto_conn_active_watcher = verto_add_timeout(worker->verto_loop, VERTO_EV_FLAG_NONE, verto_conn_timeout_cb, worker->config->conn_active_timeout);
++    verto_set_private(verto_conn_active_watcher, this, NULL);  }
++
++  return 0;
++}
++
++void Client::process_timedout_streams() {
++  if (worker->current_phase != Phase::MAIN_DURATION) {
++    return;
++  }
++
++  for (auto &p : streams) {
++    auto &req_stat = p.second.req_stat;
++    if (!req_stat.completed) {
++      req_stat.stream_close_time = std::chrono::steady_clock::now();
++    }
++  }
++
++  worker->stats.req_timedout += req_inflight;
++
++  process_abandoned_streams();
++}
++
++void Client::process_abandoned_streams() {
++  if (worker->current_phase != Phase::MAIN_DURATION) {
++    return;
++  }
++
++  auto req_abandoned = req_inflight + req_left;
++
++  worker->stats.req_failed += req_abandoned;
++  worker->stats.req_error += req_abandoned;
++
++  req_inflight = 0;
++  req_left = 0;
++}
++
++void Client::process_request_failure() {
++  if (worker->current_phase != Phase::MAIN_DURATION) {
++    return;
++  }
++
++  worker->stats.req_failed += req_left;
++  worker->stats.req_error += req_left;
++
++  req_left = 0;
++
++  if (req_inflight == 0) {
++    terminate_session();
++  }
++  std::cout << "Process Request Failure:" << worker->stats.req_failed
++            << std::endl;
++}
++
++namespace {
++void print_server_tmp_key(SSL *ssl) {
++// libressl does not have SSL_get_server_tmp_key
++#if OPENSSL_VERSION_NUMBER >= 0x10002000L && defined(SSL_get_server_tmp_key)
++  EVP_PKEY *key;
++
++  if (!SSL_get_server_tmp_key(ssl, &key)) {
++    return;
++  }
++
++  auto key_del = defer(EVP_PKEY_free, key);
++
++  std::cout << "Server Temp Key: ";
++
++  auto pkey_id = EVP_PKEY_id(key);
++  switch (pkey_id) {
++  case EVP_PKEY_RSA:
++    std::cout << "RSA " << EVP_PKEY_bits(key) << " bits" << std::endl;
++    break;
++  case EVP_PKEY_DH:
++    std::cout << "DH " << EVP_PKEY_bits(key) << " bits" << std::endl;
++    break;
++  case EVP_PKEY_EC: {
++#  if OPENSSL_3_0_0_API
++    std::array<char, 64> curve_name;
++    const char *cname;
++    if (!EVP_PKEY_get_utf8_string_param(key, "group", curve_name.data(),
++                                        curve_name.size(), nullptr)) {
++      cname = "<unknown>";
++    } else {
++      cname = curve_name.data();
++    }
++#  else  // !OPENSSL_3_0_0_API
++    auto ec = EVP_PKEY_get1_EC_KEY(key);
++    auto ec_del = defer(EC_KEY_free, ec);
++    auto nid = EC_GROUP_get_curve_name(EC_KEY_get0_group(ec));
++    auto cname = EC_curve_nid2nist(nid);
++    if (!cname) {
++      cname = OBJ_nid2sn(nid);
++    }
++#  endif // !OPENSSL_3_0_0_API
++
++    std::cout << "ECDH " << cname << " " << EVP_PKEY_bits(key) << " bits"
++              << std::endl;
++    break;
++  }
++  default:
++    std::cout << OBJ_nid2sn(pkey_id) << " " << EVP_PKEY_bits(key) << " bits"
++              << std::endl;
++    break;
++  }
++#endif // OPENSSL_VERSION_NUMBER >= 0x10002000L
++}
++} // namespace
++
++void Client::report_tls_info() {
++  if (worker->id == 0 && !worker->tls_info_report_done) {
++    worker->tls_info_report_done = true;
++    auto cipher = SSL_get_current_cipher(ssl);
++    std::cout << "TLS Protocol: " << tls::get_tls_protocol(ssl) << "\n"
++              << "Cipher: " << SSL_CIPHER_get_name(cipher) << std::endl;
++    print_server_tmp_key(ssl);
++  }
++}
++
++void Client::report_app_info() {
++  if (worker->id == 0 && !worker->app_info_report_done) {
++    worker->app_info_report_done = true;
++    std::cout << "Application protocol: " << selected_proto << std::endl;
++  }
++}
++
++void Client::terminate_session() {
++#ifdef ENABLE_HTTP3
++  if (config.is_quic()) {
++    quic.close_requested = true;
++  }
++#endif // ENABLE_HTTP3
++  if (session) {
++    session->terminate();
++  }
++}
++
++void Client::on_request(int32_t stream_id) { streams[stream_id] = Stream(); }
++
++void Client::on_header(int32_t stream_id, const uint8_t *name, size_t namelen,
++                       const uint8_t *value, size_t valuelen) {
++  auto itr = streams.find(stream_id);
++  if (itr == std::end(streams)) {
++    return;
++  }
++  auto &stream = (*itr).second;
++
++  if (worker->current_phase != Phase::MAIN_DURATION) {
++    // If the stream is for warm-up phase, then mark as a success
++    // But we do not update the count for 2xx, 3xx, etc status codes
++    // Same has been done in on_status_code function
++    stream.status_success = 1;
++    return;
++  }
++
++  if (stream.status_success == -1 && namelen == 7 &&
++      util::streq_l(":status", name, namelen)) {
++    int status = 0;
++    for (size_t i = 0; i < valuelen; ++i) {
++      if ('0' <= value[i] && value[i] <= '9') {
++        status *= 10;
++        status += value[i] - '0';
++        if (status > 999) {
++          stream.status_success = 0;
++          return;
++        }
++      } else {
++        break;
++      }
++    }
++
++    stream.req_stat.status = status;
++    if (status >= 200 && status < 300) {
++      ++worker->stats.status[2];
++      stream.status_success = 1;
++    } else if (status < 400) {
++      ++worker->stats.status[3];
++      stream.status_success = 1;
++    } else if (status < 600) {
++      ++worker->stats.status[status / 100];
++      stream.status_success = 0;
++    } else {
++      stream.status_success = 0;
++    }
++  }
++}
++
++void Client::on_status_code(int32_t stream_id, uint16_t status) {
++  auto itr = streams.find(stream_id);
++  if (itr == std::end(streams)) {
++    return;
++  }
++  auto &stream = (*itr).second;
++
++  if (worker->current_phase != Phase::MAIN_DURATION) {
++    stream.status_success = 1;
++    return;
++  }
++
++  stream.req_stat.status = status;
++  if (status >= 200 && status < 300) {
++    ++worker->stats.status[2];
++    stream.status_success = 1;
++  } else if (status < 400) {
++    ++worker->stats.status[3];
++    stream.status_success = 1;
++  } else if (status < 600) {
++    ++worker->stats.status[status / 100];
++    stream.status_success = 0;
++  } else {
++    stream.status_success = 0;
++  }
++}
++
++void Client::on_stream_close(int32_t stream_id, bool success, bool final) {
++  if (worker->current_phase == Phase::MAIN_DURATION) {
++    if (req_inflight > 0) {
++      --req_inflight;
++    }
++    auto req_stat = get_req_stat(stream_id);
++    if (!req_stat) {
++      return;
++    }
++
++    req_stat->stream_close_time = std::chrono::steady_clock::now();
++    if (success) {
++      req_stat->completed = true;
++      ++worker->stats.req_success;
++      ++cstat.req_success;
++
++      if (streams[stream_id].status_success == 1) {
++        ++worker->stats.req_status_success;
++      } else {
++        ++worker->stats.req_failed;
++      }
++
++      worker->sample_req_stat(req_stat);
++
++      // Count up in successful cases only
++      ++worker->request_times_smp.n;
++    } else {
++      ++worker->stats.req_failed;
++      ++worker->stats.req_error;
++    }
++    ++worker->stats.req_done;
++    ++req_done;
++
++    if (worker->config->log_fd != -1) {
++      auto start = std::chrono::duration_cast<std::chrono::microseconds>(
++          req_stat->request_wall_time.time_since_epoch());
++      auto delta = std::chrono::duration_cast<std::chrono::microseconds>(
++          req_stat->stream_close_time - req_stat->request_time);
++
++      std::array<uint8_t, 256> buf;
++      auto p = std::begin(buf);
++      p = util::utos(p, start.count());
++      *p++ = '\t';
++      if (success) {
++        p = util::utos(p, req_stat->status);
++      } else {
++        *p++ = '-';
++        *p++ = '1';
++      }
++      *p++ = '\t';
++      p = util::utos(p, delta.count());
++      *p++ = '\n';
++
++      auto nwrite = static_cast<size_t>(std::distance(std::begin(buf), p));
++      assert(nwrite <= buf.size());
++      while (write(worker->config->log_fd, buf.data(), nwrite) == -1 &&
++             errno == EINTR)
++        ;
++    }
++  }
++
++  worker->report_progress();
++  streams.erase(stream_id);
++  if (req_left == 0 && req_inflight == 0) {
++    terminate_session();
++    return;
++  }
++
++  if (!final && req_left > 0) {
++    if (!config.rps_enabled()) {
++      if (submit_request() != 0) {
++        process_request_failure();
++      }
++    } else if (rps_req_pending) {
++      --rps_req_pending;
++      if (submit_request() != 0) {
++        process_request_failure();
++      }
++    } else {
++      assert(rps_req_inflight);
++      --rps_req_inflight;
++    }
++  }
++}
++
++RequestStat *Client::get_req_stat(int32_t stream_id) {
++  auto it = streams.find(stream_id);
++  if (it == std::end(streams)) {
++    return nullptr;
++  }
++
++  return &(*it).second.req_stat;
++}
++
++int Client::connection_made() {
++  if (ssl) {
++    report_tls_info();
++
++    const unsigned char *next_proto = nullptr;
++    unsigned int next_proto_len;
++
++#ifndef OPENSSL_NO_NEXTPROTONEG
++    SSL_get0_next_proto_negotiated(ssl, &next_proto, &next_proto_len);
++#endif // !OPENSSL_NO_NEXTPROTONEG
++#if OPENSSL_VERSION_NUMBER >= 0x10002000L
++    if (next_proto == nullptr) {
++      SSL_get0_alpn_selected(ssl, &next_proto, &next_proto_len);
++    }
++#endif // OPENSSL_VERSION_NUMBER >= 0x10002000L
++
++    if (next_proto) {
++      auto proto = StringRef{next_proto, next_proto_len};
++      if (config.is_quic()) {
++#ifdef ENABLE_HTTP3
++        assert(session);
++        if (!util::streq(StringRef{&NGHTTP3_ALPN_H3[1]}, proto) &&
++            !util::streq_l("h3-29", proto)) {
++          return -1;
++        }
++#endif // ENABLE_HTTP3
++      } else if (util::check_h2_is_selected(proto)) {
++        session = std::make_unique<Http2Session>(this);
++      } else if (util::streq(NGHTTP2_H1_1, proto)) {
++        session = std::make_unique<Http1Session>(this);
++      }
++
++      // Just assign next_proto to selected_proto anyway to show the
++      // negotiation result.
++      selected_proto = proto.str();
++    } else if (config.is_quic()) {
++      std::cerr << "QUIC requires ALPN negotiation" << std::endl;
++      return -1;
++    } else {
++      std::cout << "No protocol negotiated. Fallback behaviour may be activated"
++                << std::endl;
++
++      for (const auto &proto : config.npn_list) {
++        if (util::streq(NGHTTP2_H1_1_ALPN, StringRef{proto})) {
++          std::cout
++              << "Server does not support NPN/ALPN. Falling back to HTTP/1.1."
++              << std::endl;
++          session = std::make_unique<Http1Session>(this);
++          selected_proto = NGHTTP2_H1_1.str();
++          break;
++        }
++      }
++    }
++
++    if (!selected_proto.empty()) {
++      report_app_info();
++    }
++
++    if (!session) {
++      std::cout
++          << "No supported protocol was negotiated. Supported protocols were:"
++          << std::endl;
++      for (const auto &proto : config.npn_list) {
++        std::cout << proto.substr(1) << std::endl;
++      }
++      disconnect();
++      return -1;
++    }
++  } else {
++    switch (config.no_tls_proto) {
++    case Config::PROTO_HTTP2:
++      session = std::make_unique<Http2Session>(this);
++      selected_proto = NGHTTP2_CLEARTEXT_PROTO_VERSION_ID;
++      break;
++    case Config::PROTO_HTTP1_1:
++      session = std::make_unique<Http1Session>(this);
++      selected_proto = NGHTTP2_H1_1.str();
++      break;
++    default:
++      // unreachable
++      assert(0);
++    }
++
++    report_app_info();
++  }
++
++  state = CLIENT_CONNECTED;
++
++  session->on_connect();
++
++  record_connect_time();
++
++  if (config.rps_enabled()) {
++    verto_rps_watcher = verto_add_timeout(worker->verto_loop, VERTO_EV_FLAG_PERSIST, verto_rps_cb, std::max(0.01, 1. / config.rps) * 1000);
++    verto_set_private(verto_rps_watcher, this, NULL);
++    rps_duration_started = std::chrono::steady_clock::now();
++  }
++
++  if (config.rps_enabled()) {
++    assert(req_left);
++
++    ++rps_req_inflight;
++
++    if (submit_request() != 0) {
++      process_request_failure();
++    }
++  } else if (!config.timing_script) {
++    auto nreq = config.is_timing_based_mode()
++                    ? std::max(req_left, session->max_concurrent_streams())
++                    : std::min(req_left, session->max_concurrent_streams());
++
++    for (; nreq > 0; --nreq) {
++      if (submit_request() != 0) {
++        process_request_failure();
++        break;
++      }
++    }
++  } else {
++
++    auto duration = config.timings[reqidx];
++
++    while (duration < std::chrono::duration<double>(1e-9)) {
++      if (submit_request() != 0) {
++        process_request_failure();
++        break;
++      }
++      duration = config.timings[reqidx];
++      if (reqidx == 0) {
++        // if reqidx wraps around back to 0, we uses up all lines and
++        // should break
++        break;
++      }
++    }
++
++    if (duration >= std::chrono::duration<double>(1e-9)) {
++      // double check since we may have break due to reqidx wraps
++      // around back to 0
++      verto_request_timeout_watcher = verto_add_timeout(worker->verto_loop, VERTO_EV_FLAG_PERSIST, verto_client_request_timeout_cb, util::ev_tstamp_from(duration) * 1000);
++      verto_set_private(verto_request_timeout_watcher, this, NULL);
++    }
++  }
++
++  return 0;
++}
++
++int Client::on_read(const uint8_t *data, size_t len) {
++  auto rv = session->on_read(data, len);
++  if (rv != 0) {
++    return -1;
++  }
++  if (worker->current_phase == Phase::MAIN_DURATION) {
++    worker->stats.bytes_total += len;
++  }
++  return 0;
++}
++
++int Client::on_write() {
++  if (wb.rleft() >= BACKOFF_WRITE_BUFFER_THRES) {
++    return 0;
++  }
++
++  if (session->on_write() != 0) {
++    return -1;
++  }
++  return 0;
++}
++
++int Client::read_clear() {
++  uint8_t buf[8_k];
++
++  for (;;) {
++    ssize_t nread;
++    while ((nread = read(fd, buf, sizeof(buf))) == -1 && errno == EINTR)
++      ;
++    if (nread == -1) {
++      if (errno == EAGAIN || errno == EWOULDBLOCK) {
++        return 0;
++      }
++      return -1;
++    }
++
++    if (nread == 0) {
++      return -1;
++    }
++
++    if (on_read(buf, nread) != 0) {
++      return -1;
++    }
++  }
++
++  return 0;
++}
++
++int Client::write_clear() {
++  std::array<struct iovec, 2> iov;
++
++  for (;;) {
++    if (on_write() != 0) {
++      return -1;
++    }
++
++    auto iovcnt = wb.riovec(iov.data(), iov.size());
++
++    if (iovcnt == 0) {
++      break;
++    }
++
++    ssize_t nwrite;
++    while ((nwrite = writev(fd, iov.data(), iovcnt)) == -1 && errno == EINTR)
++      ;
++
++    if (nwrite == -1) {
++      if (errno == EAGAIN || errno == EWOULDBLOCK) {
++        return 0;
++      }
++      return -1;
++    }
++
++    wb.drain(nwrite);
++  }
++
++  return 0;
++}
++
++int Client::connected() {
++  if (!util::check_socket_connected(fd)) {
++    return ERR_CONNECT_FAIL;
++  }
++
++  if (ssl) {
++    SSL_set_fd(ssl, fd);
++
++    readfn = &Client::tls_handshake;
++    writefn = &Client::tls_handshake;
++
++    return do_write();
++  }
++
++  readfn = &Client::read_clear;
++  writefn = &Client::write_clear;
++
++  if (connection_made() != 0) {
++    return -1;
++  }
++
++  return 0;
++}
++
++int Client::tls_handshake() {
++  ERR_clear_error();
++
++  auto rv = SSL_do_handshake(ssl);
++
++  if (rv <= 0) {
++    auto err = SSL_get_error(ssl, rv);
++    switch (err) {
++    case SSL_ERROR_WANT_READ:
++      // Remove the write observer  
++      // add it to the event loop inside the read event callback
++      verto_del(verto_wev);      
++      return 0;
++    case SSL_ERROR_WANT_WRITE:
++      return 0;
++    default:
++      return -1;
++    }
++  }
++
++  readfn = &Client::read_tls;
++  writefn = &Client::write_tls;
++
++  if (connection_made() != 0) {
++    return -1;
++  }
++
++  return 0;
++}
++
++int Client::read_tls() {
++  uint8_t buf[8_k];
++
++  ERR_clear_error();
++
++  for (;;) {
++    auto rv = SSL_read(ssl, buf, sizeof(buf));
++
++    if (rv <= 0) {
++      auto err = SSL_get_error(ssl, rv);
++      switch (err) {
++      case SSL_ERROR_WANT_READ:
++        return 0;
++      case SSL_ERROR_WANT_WRITE:
++        // renegotiation started
++        return -1;
++      default:
++        return -1;
++      }
++    }
++
++    if (on_read(buf, rv) != 0) {
++      return -1;
++    }
++  }
++}
++
++int Client::write_tls() {
++  ERR_clear_error();
++
++  struct iovec iov;
++
++  for (;;) {
++    if (on_write() != 0) {
++      return -1;
++    }
++
++    auto iovcnt = wb.riovec(&iov, 1);
++
++    if (iovcnt == 0) {
++      // iovcnt == 0 indicates that the write event is no longer needed
++      verto_del(verto_wev);
++      break;
++    }
++
++    auto rv = SSL_write(ssl, iov.iov_base, iov.iov_len);
++
++    if (rv <= 0) {
++      auto err = SSL_get_error(ssl, rv);
++      switch (err) {
++      case SSL_ERROR_WANT_READ:
++        // renegotiation started
++        return -1;
++      case SSL_ERROR_WANT_WRITE:
++        return 0;
++      default:
++        return -1;
++      }
++    }
++
++    wb.drain(rv);
++  }
++
++  return 0;
++}
++
++#ifdef ENABLE_HTTP3
++// Returns 1 if sendmsg is blocked.
++int Client::write_udp(const sockaddr *addr, socklen_t addrlen,
++                      const uint8_t *data, size_t datalen, size_t gso_size) {
++  iovec msg_iov;
++  msg_iov.iov_base = const_cast<uint8_t *>(data);
++  msg_iov.iov_len = datalen;
++
++  msghdr msg{};
++  msg.msg_name = const_cast<sockaddr *>(addr);
++  msg.msg_namelen = addrlen;
++  msg.msg_iov = &msg_iov;
++  msg.msg_iovlen = 1;
++
++#  ifdef UDP_SEGMENT
++  std::array<uint8_t, CMSG_SPACE(sizeof(uint16_t))> msg_ctrl{};
++  if (gso_size && datalen > gso_size) {
++    msg.msg_control = msg_ctrl.data();
++    msg.msg_controllen = msg_ctrl.size();
++
++    auto cm = CMSG_FIRSTHDR(&msg);
++    cm->cmsg_level = SOL_UDP;
++    cm->cmsg_type = UDP_SEGMENT;
++    cm->cmsg_len = CMSG_LEN(sizeof(uint16_t));
++    *(reinterpret_cast<uint16_t *>(CMSG_DATA(cm))) = gso_size;
++  }
++#  endif // UDP_SEGMENT
++
++  auto nwrite = sendmsg(fd, &msg, 0);
++  if (nwrite < 0) {
++    if (errno == EAGAIN || errno == EWOULDBLOCK) {
++      return 1;
++    }
++
++    std::cerr << "sendmsg: errno=" << errno << std::endl;
++  } else {
++    ++worker->stats.udp_dgram_sent;
++  }
++
++  return 0;
++}
++#endif // ENABLE_HTTP3
++
++void Client::record_request_time(RequestStat *req_stat) {
++  req_stat->request_time = std::chrono::steady_clock::now();
++  req_stat->request_wall_time = std::chrono::system_clock::now();
++}
++
++void Client::record_connect_start_time() {
++  cstat.connect_start_time = std::chrono::steady_clock::now();
++}
++
++void Client::record_connect_time() {
++  cstat.connect_time = std::chrono::steady_clock::now();
++}
++
++void Client::record_ttfb() {
++  if (recorded(cstat.ttfb)) {
++    return;
++  }
++
++  cstat.ttfb = std::chrono::steady_clock::now();
++}
++
++void Client::clear_connect_times() {
++  cstat.connect_start_time = std::chrono::steady_clock::time_point();
++  cstat.connect_time = std::chrono::steady_clock::time_point();
++  cstat.ttfb = std::chrono::steady_clock::time_point();
++}
++
++void Client::record_client_start_time() {
++  // Record start time only once at the very first connection is going
++  // to be made.
++  if (recorded(cstat.client_start_time)) {
++    return;
++  }
++
++  cstat.client_start_time = std::chrono::steady_clock::now();
++}
++
++void Client::record_client_end_time() {
++  // Unlike client_start_time, we overwrite client_end_time.  This
++  // handles multiple connect/disconnect for HTTP/1.1 benchmark.
++  cstat.client_end_time = std::chrono::steady_clock::now();
++}
++
++void Client::signal_write() {
++  // This function has no effect on libverto-based projects,
++  // but it is used in some files and needs to be retained 
++}
++
++void Client::try_new_connection() { 
++  new_connection_requested = true; 
++}
++
++
++Worker::Worker(uint32_t id, SSL_CTX *ssl_ctx, size_t req_todo, size_t nclients,
++               size_t rate, size_t max_samples, Config *config)
++    : randgen(util::make_mt19937()),
++      stats(req_todo, nclients),
++      ssl_ctx(ssl_ctx),
++      config(config),
++      id(id),
++      tls_info_report_done(false),
++      app_info_report_done(false),
++      nconns_made(0),
++      nclients(nclients),
++      nreqs_per_client(req_todo / nclients),
++      nreqs_rem(req_todo % nclients),
++      rate(rate),
++      max_samples(max_samples),
++      next_client_id(0) {
++  if (!config->is_rate_mode() && !config->is_timing_based_mode()) {
++    progress_interval = std::max(static_cast<size_t>(1), req_todo / 10);
++  } else {
++    progress_interval = std::max(static_cast<size_t>(1), nclients / 10);
++  }
++
++  if (config->is_timing_based_mode()) {
++    stats.req_stats.reserve(std::max(req_todo, max_samples));
++    stats.client_stats.reserve(std::max(nclients, max_samples));
++  } else {
++    stats.req_stats.reserve(std::min(req_todo, max_samples));
++    stats.client_stats.reserve(std::min(nclients, max_samples));
++  }
++
++  sampling_init(request_times_smp, max_samples);
++  sampling_init(client_smp, max_samples);
++
++  if (config->is_timing_based_mode()) {
++    current_phase = Phase::INITIAL_IDLE;
++  } else {
++    current_phase = Phase::MAIN_DURATION;
++  }
++}
++
++Worker::~Worker() {
++  // Clear all event loops
++  verto_cleanup();
++}
++
++void Worker::stop_all_clients() {
++  for (auto client : clients) {
++    if (client) {
++      client->terminate_session();
++    }
++  }
++}
++
++void Worker::free_client(Client *deleted_client) {
++  for (auto &client : clients) {
++    if (client == deleted_client) {
++      client->req_todo = client->req_done;
++      stats.req_todo += client->req_todo;
++      auto index = &client - &clients[0];
++      clients[index] = nullptr;
++      return;
++    }
++  }
++}
++
++void Worker::run() {
++
++  if (!config->is_rate_mode() && !config->is_timing_based_mode()) {
++    for (size_t i = 0; i < nclients; ++i) {
++      auto req_todo = nreqs_per_client;
++      if (nreqs_rem > 0) {
++        ++req_todo;
++        --nreqs_rem;
++      }
++
++      verto_loop = verto_new(NULL, VERTO_EV_TYPE_NONE);
++      auto client = std::make_unique<Client>(next_client_id++, this, req_todo);
++      if (client->connect() != 0) {
++        std::cerr << "client could not connect to host" << std::endl;
++        client->fail();
++      } else {
++        client.release();
++      }
++      verto_run(verto_loop);
++      verto_free(verto_loop);
++
++    }
++  } else {
++    // call the callback to start for one single time
++    verto_timeout_watcher = verto_add_timeout(verto_new(NULL, VERTO_EV_TYPE_NONE), VERTO_EV_FLAG_NONE, verto_rate_period_timeout_w_cb, 0);
++    verto_set_private(verto_timeout_watcher, this, NULL);
++    verto_rate_period_timeout_w_cb(verto_new(NULL, VERTO_EV_TYPE_NONE), verto_timeout_watcher);
++  }
++}
++
++namespace {
++template <typename Stats, typename Stat>
++void sample(Sampling &smp, Stats &stats, Stat *s) {
++  ++smp.n;
++  if (stats.size() < smp.max_samples) {
++    stats.push_back(*s);
++    return;
++  }
++  auto d = std::uniform_int_distribution<unsigned long>(0, smp.n - 1);
++  auto i = d(gen);
++  if (i < smp.max_samples) {
++    stats[i] = *s;
++  }
++}
++} // namespace
++
++void Worker::sample_req_stat(RequestStat *req_stat) {
++  sample(request_times_smp, stats.req_stats, req_stat);
++}
++
++void Worker::sample_client_stat(ClientStat *cstat) {
++  sample(client_smp, stats.client_stats, cstat);
++}
++
++void Worker::report_progress() {
++  if (id != 0 || config->is_rate_mode() || stats.req_done % progress_interval ||
++      config->is_timing_based_mode()) {
++    return;
++  }
++
++  std::cout << "progress: " << stats.req_done * 100 / stats.req_todo << "% done"
++            << std::endl;
++}
++
++void Worker::report_rate_progress() {
++  if (id != 0 || nconns_made % progress_interval) {
++    return;
++  }
++
++  std::cout << "progress: " << nconns_made * 100 / nclients
++            << "% of clients started" << std::endl;
++}
++
++namespace {
++// Returns percentage of number of samples within mean +/- sd.
++double within_sd(const std::vector<double> &samples, double mean, double sd) {
++  if (samples.size() == 0) {
++    return 0.0;
++  }
++  auto lower = mean - sd;
++  auto upper = mean + sd;
++  auto m = std::count_if(
++      std::begin(samples), std::end(samples),
++      [&lower, &upper](double t) { return lower <= t && t <= upper; });
++  return (m / static_cast<double>(samples.size())) * 100;
++}
++} // namespace
++
++namespace {
++// Computes statistics using |samples|. The min, max, mean, sd, and
++// percentage of number of samples within mean +/- sd are computed.
++// If |sampling| is true, this computes sample variance.  Otherwise,
++// population variance.
++SDStat compute_time_stat(const std::vector<double> &samples,
++                         bool sampling = false) {
++  if (samples.empty()) {
++    return {0.0, 0.0, 0.0, 0.0, 0.0};
++  }
++  // standard deviation calculated using Rapid calculation method:
++  // https://en.wikipedia.org/wiki/Standard_deviation#Rapid_calculation_methods
++  double a = 0, q = 0;
++  size_t n = 0;
++  double sum = 0;
++  auto res = SDStat{std::numeric_limits<double>::max(),
++                    std::numeric_limits<double>::min()};
++  for (const auto &t : samples) {
++    ++n;
++    res.min = std::min(res.min, t);
++    res.max = std::max(res.max, t);
++    sum += t;
++
++    auto na = a + (t - a) / n;
++    q += (t - a) * (t - na);
++    a = na;
++  }
++
++  assert(n > 0);
++  res.mean = sum / n;
++  res.sd = sqrt(q / (sampling && n > 1 ? n - 1 : n));
++  res.within_sd = within_sd(samples, res.mean, res.sd);
++
++  return res;
++}
++} // namespace
++
++namespace {
++SDStats
++process_time_stats(const std::vector<std::unique_ptr<Worker>> &workers) {
++  auto request_times_sampling = false;
++  auto client_times_sampling = false;
++  size_t nrequest_times = 0;
++  size_t nclient_times = 0;
++  for (const auto &w : workers) {
++    nrequest_times += w->stats.req_stats.size();
++    request_times_sampling = w->request_times_smp.n > w->stats.req_stats.size();
++
++    nclient_times += w->stats.client_stats.size();
++    client_times_sampling = w->client_smp.n > w->stats.client_stats.size();
++  }
++
++  std::vector<double> request_times;
++  request_times.reserve(nrequest_times);
++
++  std::vector<double> connect_times, ttfb_times, rps_values;
++  connect_times.reserve(nclient_times);
++  ttfb_times.reserve(nclient_times);
++  rps_values.reserve(nclient_times);
++
++  for (const auto &w : workers) {
++    for (const auto &req_stat : w->stats.req_stats) {
++      if (!req_stat.completed) {
++        continue;
++      }
++      request_times.push_back(
++          std::chrono::duration_cast<std::chrono::duration<double>>(
++              req_stat.stream_close_time - req_stat.request_time)
++              .count());
++    }
++
++    const auto &stat = w->stats;
++
++    for (const auto &cstat : stat.client_stats) {
++      if (recorded(cstat.client_start_time) &&
++          recorded(cstat.client_end_time)) {
++        auto t = std::chrono::duration_cast<std::chrono::duration<double>>(
++                     cstat.client_end_time - cstat.client_start_time)
++                     .count();
++        if (t > 1e-9) {
++          rps_values.push_back(cstat.req_success / t);
++        }
++      }
++
++      // We will get connect event before FFTB.
++      if (!recorded(cstat.connect_start_time) ||
++          !recorded(cstat.connect_time)) {
++        continue;
++      }
++
++      connect_times.push_back(
++          std::chrono::duration_cast<std::chrono::duration<double>>(
++              cstat.connect_time - cstat.connect_start_time)
++              .count());
++
++      if (!recorded(cstat.ttfb)) {
++        continue;
++      }
++
++      ttfb_times.push_back(
++          std::chrono::duration_cast<std::chrono::duration<double>>(
++              cstat.ttfb - cstat.connect_start_time)
++              .count());
++    }
++  }
++
++  return {compute_time_stat(request_times, request_times_sampling),
++          compute_time_stat(connect_times, client_times_sampling),
++          compute_time_stat(ttfb_times, client_times_sampling),
++          compute_time_stat(rps_values, client_times_sampling)};
++}
++} // namespace
++
++namespace {
++void resolve_host() {
++  if (config.base_uri_unix) {
++    auto res = std::make_unique<addrinfo>();
++    res->ai_family = config.unix_addr.sun_family;
++    res->ai_socktype = SOCK_STREAM;
++    res->ai_addrlen = sizeof(config.unix_addr);
++    res->ai_addr =
++        static_cast<struct sockaddr *>(static_cast<void *>(&config.unix_addr));
++
++    config.addrs = res.release();
++    return;
++  };
++
++  int rv;
++  addrinfo hints{}, *res;
++
++  hints.ai_family = AF_UNSPEC;
++  hints.ai_socktype = SOCK_STREAM;
++  hints.ai_protocol = 0;
++  hints.ai_flags = AI_ADDRCONFIG;
++
++  const auto &resolve_host =
++      config.connect_to_host.empty() ? config.host : config.connect_to_host;
++  auto port =
++      config.connect_to_port == 0 ? config.port : config.connect_to_port;
++
++  rv =
++      getaddrinfo(resolve_host.c_str(), util::utos(port).c_str(), &hints, &res);
++  if (rv != 0) {
++    std::cerr << "getaddrinfo() failed: " << gai_strerror(rv) << std::endl;
++    exit(EXIT_FAILURE);
++  }
++  if (res == nullptr) {
++    std::cerr << "No address returned" << std::endl;
++    exit(EXIT_FAILURE);
++  }
++  config.addrs = res;
++}
++} // namespace
++
++namespace {
++std::string get_reqline(const char *uri, const http_parser_url &u) {
++  std::string reqline;
++
++  if (util::has_uri_field(u, UF_PATH)) {
++    reqline = util::get_uri_field(uri, u, UF_PATH).str();
++  } else {
++    reqline = "/";
++  }
++
++  if (util::has_uri_field(u, UF_QUERY)) {
++    reqline += '?';
++    reqline += util::get_uri_field(uri, u, UF_QUERY);
++  }
++
++  return reqline;
++}
++} // namespace
++
++#ifndef OPENSSL_NO_NEXTPROTONEG
++namespace {
++int client_select_next_proto_cb(SSL *ssl, unsigned char **out,
++                                unsigned char *outlen, const unsigned char *in,
++                                unsigned int inlen, void *arg) {
++  if (util::select_protocol(const_cast<const unsigned char **>(out), outlen, in,
++                            inlen, config.npn_list)) {
++    return SSL_TLSEXT_ERR_OK;
++  }
++
++  // OpenSSL will terminate handshake with fatal alert if we return
++  // NOACK.  So there is no way to fallback.
++  return SSL_TLSEXT_ERR_NOACK;
++}
++} // namespace
++#endif // !OPENSSL_NO_NEXTPROTONEG
++
++namespace {
++constexpr char UNIX_PATH_PREFIX[] = "unix:";
++} // namespace
++
++namespace {
++bool parse_base_uri(const StringRef &base_uri) {
++  http_parser_url u{};
++  if (http_parser_parse_url(base_uri.c_str(), base_uri.size(), 0, &u) != 0 ||
++      !util::has_uri_field(u, UF_SCHEMA) || !util::has_uri_field(u, UF_HOST)) {
++    return false;
++  }
++
++  config.scheme = util::get_uri_field(base_uri.c_str(), u, UF_SCHEMA).str();
++  config.host = util::get_uri_field(base_uri.c_str(), u, UF_HOST).str();
++  config.default_port = util::get_default_port(base_uri.c_str(), u);
++  if (util::has_uri_field(u, UF_PORT)) {
++    config.port = u.port;
++  } else {
++    config.port = config.default_port;
++  }
++
++  return true;
++}
++} // namespace
++namespace {
++// Use std::vector<std::string>::iterator explicitly, without that,
++// http_parser_url u{} fails with clang-3.4.
++std::vector<std::string> parse_uris(std::vector<std::string>::iterator first,
++                                    std::vector<std::string>::iterator last) {
++  std::vector<std::string> reqlines;
++
++  if (first == last) {
++    std::cerr << "no URI available" << std::endl;
++    exit(EXIT_FAILURE);
++  }
++
++  if (!config.has_base_uri()) {
++
++    if (!parse_base_uri(StringRef{*first})) {
++      std::cerr << "invalid URI: " << *first << std::endl;
++      exit(EXIT_FAILURE);
++    }
++
++    config.base_uri = *first;
++  }
++
++  for (; first != last; ++first) {
++    http_parser_url u{};
++
++    auto uri = (*first).c_str();
++
++    if (http_parser_parse_url(uri, (*first).size(), 0, &u) != 0) {
++      std::cerr << "invalid URI: " << uri << std::endl;
++      exit(EXIT_FAILURE);
++    }
++
++    reqlines.push_back(get_reqline(uri, u));
++  }
++
++  return reqlines;
++}
++} // namespace
++
++namespace {
++std::vector<std::string> read_uri_from_file(std::istream &infile) {
++  std::vector<std::string> uris;
++  std::string line_uri;
++  while (std::getline(infile, line_uri)) {
++    uris.push_back(line_uri);
++  }
++
++  return uris;
++}
++} // namespace
++
++namespace {
++void read_script_from_file(
++    std::istream &infile,
++    std::vector<std::chrono::steady_clock::duration> &timings,
++    std::vector<std::string> &uris) {
++  std::string script_line;
++  int line_count = 0;
++  while (std::getline(infile, script_line)) {
++    line_count++;
++    if (script_line.empty()) {
++      std::cerr << "Empty line detected at line " << line_count
++                << ". Ignoring and continuing." << std::endl;
++      continue;
++    }
++
++    std::size_t pos = script_line.find("\t");
++    if (pos == std::string::npos) {
++      std::cerr << "Invalid line format detected, no tab character at line "
++                << line_count << ". \n\t" << script_line << std::endl;
++      exit(EXIT_FAILURE);
++    }
++
++    const char *start = script_line.c_str();
++    char *end;
++    auto v = std::strtod(start, &end);
++
++    errno = 0;
++    if (v < 0.0 || !std::isfinite(v) || end == start || errno != 0) {
++      auto error = errno;
++      std::cerr << "Time value error at line " << line_count << ". \n\t"
++                << "value = " << script_line.substr(0, pos) << std::endl;
++      if (error != 0) {
++        std::cerr << "\t" << strerror(error) << std::endl;
++      }
++      exit(EXIT_FAILURE);
++    }
++
++    timings.emplace_back(
++        std::chrono::duration_cast<std::chrono::steady_clock::duration>(
++            std::chrono::duration<double, std::milli>(v)));
++    uris.push_back(script_line.substr(pos + 1, script_line.size()));
++  }
++}
++} // namespace
++
++namespace {
++std::unique_ptr<Worker> create_worker(uint32_t id, SSL_CTX *ssl_ctx,
++                                      size_t nreqs, size_t nclients,
++                                      size_t rate, size_t max_samples) {
++  std::stringstream rate_report;
++  if (config.is_rate_mode() && nclients > rate) {
++    rate_report << "Up to " << rate << " client(s) will be created every "
++                << util::duration_str(config.rate_period) << " ";
++  }
++
++  if (config.is_timing_based_mode()) {
++    std::cout << "spawning thread #" << id << ": " << nclients
++              << " total client(s). Timing-based test with "
++              << config.warm_up_time << "s of warm-up time and "
++              << config.duration << "s of main duration for measurements."
++              << std::endl;
++  } else {
++    std::cout << "spawning thread #" << id << ": " << nclients
++              << " total client(s). " << rate_report.str() << nreqs
++              << " total requests" << std::endl;
++  }
++
++  if (config.is_rate_mode()) {
++    return std::make_unique<Worker>(id, ssl_ctx, nreqs, nclients, rate,
++                                    max_samples, &config);
++  } else {
++    // Here rate is same as client because the rate_timeout callback
++    // will be called only once
++    return std::make_unique<Worker>(id, ssl_ctx, nreqs, nclients, nclients,
++                                    max_samples, &config);
++  }
++}
++} // namespace
++
++namespace {
++int parse_header_table_size(uint32_t &dst, const char *opt,
++                            const char *optarg) {
++  auto n = util::parse_uint_with_unit(optarg);
++  if (n == -1) {
++    std::cerr << "--" << opt << ": Bad option value: " << optarg << std::endl;
++    return -1;
++  }
++  if (n > std::numeric_limits<uint32_t>::max()) {
++    std::cerr << "--" << opt
++              << ": Value too large.  It should be less than or equal to "
++              << std::numeric_limits<uint32_t>::max() << std::endl;
++    return -1;
++  }
++
++  dst = n;
++
++  return 0;
++}
++} // namespace
++
++namespace {
++void print_version(std::ostream &out) {
++  out << "h2load nghttp2/" NGHTTP2_VERSION << std::endl;
++}
++} // namespace
++
++namespace {
++void print_usage(std::ostream &out) {
++  out << R"(Usage: h2load [OPTIONS]... [URI]...
++benchmarking tool for HTTP/2 server)"
++      << std::endl;
++}
++} // namespace
++
++namespace {
++constexpr char DEFAULT_NPN_LIST[] = "h2,h2-16,h2-14,http/1.1";
++} // namespace
++
++namespace {
++void print_help(std::ostream &out) {
++  print_usage(out);
++
++  auto config = Config();
++
++  out << R"(
++  <URI>       Specify URI to access.   Multiple URIs can be specified.
++              URIs are used  in this order for each  client.  All URIs
++              are used, then  first URI is used and then  2nd URI, and
++              so  on.  The  scheme, host  and port  in the  subsequent
++              URIs, if present,  are ignored.  Those in  the first URI
++              are used solely.  Definition of a base URI overrides all
++              scheme, host or port values.
++Options:
++  -n, --requests=<N>
++              Number of  requests across all  clients.  If it  is used
++              with --timing-script-file option,  this option specifies
++              the number of requests  each client performs rather than
++              the number of requests  across all clients.  This option
++              is ignored if timing-based  benchmarking is enabled (see
++              --duration option).
++              Default: )"
++      << config.nreqs << R"(
++  -c, --clients=<N>
++              Number  of concurrent  clients.   With  -r option,  this
++              specifies the maximum number of connections to be made.
++              Default: )"
++      << config.nclients << R"(
++  -t, --threads=<N>
++              Number of native threads.
++              Default: )"
++      << config.nthreads << R"(
++  -i, --input-file=<PATH>
++              Path of a file with multiple URIs are separated by EOLs.
++              This option will disable URIs getting from command-line.
++              If '-' is given as <PATH>, URIs will be read from stdin.
++              URIs are used  in this order for each  client.  All URIs
++              are used, then  first URI is used and then  2nd URI, and
++              so  on.  The  scheme, host  and port  in the  subsequent
++              URIs, if present,  are ignored.  Those in  the first URI
++              are used solely.  Definition of a base URI overrides all
++              scheme, host or port values.
++  -m, --max-concurrent-streams=<N>
++              Max  concurrent  streams  to issue  per  session.   When
++              http/1.1  is used,  this  specifies the  number of  HTTP
++              pipelining requests in-flight.
++              Default: 1
++  -f, --max-frame-size=<SIZE>
++              Maximum frame size that the local endpoint is willing to
++              receive.
++              Default: )"
++      << util::utos_unit(config.max_frame_size) << R"(
++  -w, --window-bits=<N>
++              Sets the stream level initial window size to (2**<N>)-1.
++              For QUIC, <N> is capped to 26 (roughly 64MiB).
++              Default: )"
++      << config.window_bits << R"(
++  -W, --connection-window-bits=<N>
++              Sets  the  connection  level   initial  window  size  to
++              (2**<N>)-1.
++              Default: )"
++      << config.connection_window_bits << R"(
++  -H, --header=<HEADER>
++              Add/Override a header to the requests.
++  --ciphers=<SUITE>
++              Set  allowed cipher  list  for TLSv1.2  or earlier.   The
++              format of the string is described in OpenSSL ciphers(1).
++              Default: )"
++      << config.ciphers << R"(
++  --tls13-ciphers=<SUITE>
++              Set allowed cipher list for  TLSv1.3.  The format of the
++              string is described in OpenSSL ciphers(1).
++              Default: )"
++      << config.tls13_ciphers << R"(
++  -p, --no-tls-proto=<PROTOID>
++              Specify ALPN identifier of the  protocol to be used when
++              accessing http URI without SSL/TLS.
++              Available protocols: )"
++      << NGHTTP2_CLEARTEXT_PROTO_VERSION_ID << R"( and )" << NGHTTP2_H1_1 << R"(
++              Default: )"
++      << NGHTTP2_CLEARTEXT_PROTO_VERSION_ID << R"(
++  -d, --data=<PATH>
++              Post FILE to  server.  The request method  is changed to
++              POST.   For  http/1.1 connection,  if  -d  is used,  the
++              maximum number of in-flight pipelined requests is set to
++              1.
++  -r, --rate=<N>
++              Specifies  the  fixed  rate  at  which  connections  are
++              created.   The   rate  must   be  a   positive  integer,
++              representing the  number of  connections to be  made per
++              rate period.   The maximum  number of connections  to be
++              made  is  given  in  -c   option.   This  rate  will  be
++              distributed among  threads as  evenly as  possible.  For
++              example,  with   -t2  and   -r4,  each  thread   gets  2
++              connections per period.  When the rate is 0, the program
++              will run  as it  normally does, creating  connections at
++              whatever variable rate it  wants.  The default value for
++              this option is 0.  -r and -D are mutually exclusive.
++  --rate-period=<DURATION>
++              Specifies the time  period between creating connections.
++              The period  must be a positive  number, representing the
++              length of the period in time.  This option is ignored if
++              the rate option is not used.  The default value for this
++              option is 1s.
++  -D, --duration=<DURATION>
++              Specifies the main duration for the measurements in case
++              of timing-based  benchmarking.  -D  and -r  are mutually
++              exclusive.
++  --warm-up-time=<DURATION>
++              Specifies the  time  period  before  starting the actual
++              measurements, in  case  of  timing-based benchmarking.
++              Needs to provided along with -D option.
++  -T, --connection-active-timeout=<DURATION>
++              Specifies  the maximum  time that  h2load is  willing to
++              keep a  connection open,  regardless of the  activity on
++              said connection.  <DURATION> must be a positive integer,
++              specifying the amount of time  to wait.  When no timeout
++              value is  set (either  active or inactive),  h2load will
++              keep  a  connection  open indefinitely,  waiting  for  a
++              response.
++  -N, --connection-inactivity-timeout=<DURATION>
++              Specifies the amount  of time that h2load  is willing to
++              wait to see activity  on a given connection.  <DURATION>
++              must  be a  positive integer,  specifying the  amount of
++              time  to wait.   When no  timeout value  is set  (either
++              active or inactive), h2load  will keep a connection open
++              indefinitely, waiting for a response.
++  --timing-script-file=<PATH>
++              Path of a file containing one or more lines separated by
++              EOLs.  Each script line is composed of two tab-separated
++              fields.  The first field represents the time offset from
++              the start of execution, expressed as a positive value of
++              milliseconds  with microsecond  resolution.  The  second
++              field represents the URI.  This option will disable URIs
++              getting from  command-line.  If '-' is  given as <PATH>,
++              script lines will be read  from stdin.  Script lines are
++              used in order for each client.   If -n is given, it must
++              be less  than or  equal to the  number of  script lines,
++              larger values are clamped to the number of script lines.
++              If -n is not given,  the number of requests will default
++              to the  number of  script lines.   The scheme,  host and
++              port defined in  the first URI are  used solely.  Values
++              contained  in  other  URIs,  if  present,  are  ignored.
++              Definition of a  base URI overrides all  scheme, host or
++              port   values.   --timing-script-file   and  --rps   are
++              mutually exclusive.
++  -B, --base-uri=(<URI>|unix:<PATH>)
++              Specify URI from which the scheme, host and port will be
++              used  for  all requests.   The  base  URI overrides  all
++              values  defined either  at  the command  line or  inside
++              input files.  If argument  starts with "unix:", then the
++              rest  of the  argument will  be treated  as UNIX  domain
++              socket path.   The connection is made  through that path
++              instead of TCP.   In this case, scheme  is inferred from
++              the first  URI appeared  in the  command line  or inside
++              input files as usual.
++  --npn-list=<LIST>
++              Comma delimited list of  ALPN protocol identifier sorted
++              in the  order of preference.  That  means most desirable
++              protocol comes  first.  This  is used  in both  ALPN and
++              NPN.  The parameter must be  delimited by a single comma
++              only  and any  white spaces  are  treated as  a part  of
++              protocol string.
++              Default: )"
++      << DEFAULT_NPN_LIST << R"(
++  --h1        Short        hand         for        --npn-list=http/1.1
++              --no-tls-proto=http/1.1,    which   effectively    force
++              http/1.1 for both http and https URI.
++  --header-table-size=<SIZE>
++              Specify decoder header table size.
++              Default: )"
++      << util::utos_unit(config.header_table_size) << R"(
++  --encoder-header-table-size=<SIZE>
++              Specify encoder header table size.  The decoder (server)
++              specifies  the maximum  dynamic table  size it  accepts.
++              Then the negotiated dynamic table size is the minimum of
++              this option value and the value which server specified.
++              Default: )"
++      << util::utos_unit(config.encoder_header_table_size) << R"(
++  --log-file=<PATH>
++              Write per-request information to a file as tab-separated
++              columns: start  time as  microseconds since  epoch; HTTP
++              status code;  microseconds until end of  response.  More
++              columns may be added later.  Rows are ordered by end-of-
++              response  time when  using  one worker  thread, but  may
++              appear slightly  out of order with  multiple threads due
++              to buffering.  Status code is -1 for failed streams.
++  --qlog-file-base=<PATH>
++              Enable qlog output and specify base file name for qlogs.
++              Qlog is emitted  for each connection.  For  a given base
++              name   "base",    each   output   file    name   becomes
++              "base.M.N.sqlog" where M is worker ID and N is client ID
++              (e.g. "base.0.3.sqlog").  Only effective in QUIC runs.
++  --connect-to=<HOST>[:<PORT>]
++              Host and port to connect  instead of using the authority
++              in <URI>.
++  --rps=<N>   Specify request  per second for each  client.  --rps and
++              --timing-script-file are mutually exclusive.
++  --groups=<GROUPS>
++              Specify the supported groups.
++              Default: )"
++      << config.groups << R"(
++  --no-udp-gso
++              Disable UDP GSO.
++  --max-udp-payload-size=<SIZE>
++              Specify the maximum outgoing UDP datagram payload size.
++  --ktls      Enable ktls.
++  -v, --verbose
++              Output debug information.
++  --version   Display version information and exit.
++  -h, --help  Display this help and exit.
++
++--
++
++  The <SIZE> argument is an integer and an optional unit (e.g., 10K is
++  10 * 1024).  Units are K, M and G (powers of 1024).
++
++  The <DURATION> argument is an integer and an optional unit (e.g., 1s
++  is 1 second and 500ms is 500 milliseconds).  Units are h, m, s or ms
++  (hours, minutes, seconds and milliseconds, respectively).  If a unit
++  is omitted, a second is used as unit.)"
++      << std::endl;
++}
++} // namespace
++
++int main(int argc, char **argv) {
++  tls::libssl_init();
++
++#ifndef NOTHREADS
++  tls::LibsslGlobalLock lock;
++#endif // NOTHREADS
++
++  std::string datafile;
++  std::string logfile;
++  std::string qlog_base;
++  bool nreqs_set_manually = false;
++  while (1) {
++    static int flag = 0;
++    constexpr static option long_options[] = {
++        {"requests", required_argument, nullptr, 'n'},
++        {"clients", required_argument, nullptr, 'c'},
++        {"data", required_argument, nullptr, 'd'},
++        {"threads", required_argument, nullptr, 't'},
++        {"max-concurrent-streams", required_argument, nullptr, 'm'},
++        {"window-bits", required_argument, nullptr, 'w'},
++        {"max-frame-size", required_argument, nullptr, 'f'},
++        {"connection-window-bits", required_argument, nullptr, 'W'},
++        {"input-file", required_argument, nullptr, 'i'},
++        {"header", required_argument, nullptr, 'H'},
++        {"no-tls-proto", required_argument, nullptr, 'p'},
++        {"verbose", no_argument, nullptr, 'v'},
++        {"help", no_argument, nullptr, 'h'},
++        {"version", no_argument, &flag, 1},
++        {"ciphers", required_argument, &flag, 2},
++        {"rate", required_argument, nullptr, 'r'},
++        {"connection-active-timeout", required_argument, nullptr, 'T'},
++        {"connection-inactivity-timeout", required_argument, nullptr, 'N'},
++        {"duration", required_argument, nullptr, 'D'},
++        {"timing-script-file", required_argument, &flag, 3},
++        {"base-uri", required_argument, nullptr, 'B'},
++        {"npn-list", required_argument, &flag, 4},
++        {"rate-period", required_argument, &flag, 5},
++        {"h1", no_argument, &flag, 6},
++        {"header-table-size", required_argument, &flag, 7},
++        {"encoder-header-table-size", required_argument, &flag, 8},
++        {"warm-up-time", required_argument, &flag, 9},
++        {"log-file", required_argument, &flag, 10},
++        {"connect-to", required_argument, &flag, 11},
++        {"rps", required_argument, &flag, 12},
++        {"groups", required_argument, &flag, 13},
++        {"tls13-ciphers", required_argument, &flag, 14},
++        {"no-udp-gso", no_argument, &flag, 15},
++        {"qlog-file-base", required_argument, &flag, 16},
++        {"max-udp-payload-size", required_argument, &flag, 17},
++        {"ktls", no_argument, &flag, 18},
++        {nullptr, 0, nullptr, 0}};
++    int option_index = 0;
++    auto c = getopt_long(argc, argv,
++                         "hvW:c:d:m:n:p:t:w:f:H:i:r:T:N:D:B:", long_options,
++                         &option_index);
++    if (c == -1) {
++      break;
++    }
++    switch (c) {
++    case 'n': {
++      auto n = util::parse_uint(optarg);
++      if (n == -1) {
++        std::cerr << "-n: bad option value: " << optarg << std::endl;
++        exit(EXIT_FAILURE);
++      }
++      config.nreqs = n;
++      nreqs_set_manually = true;
++      break;
++    }
++    case 'c': {
++      auto n = util::parse_uint(optarg);
++      if (n == -1) {
++        std::cerr << "-c: bad option value: " << optarg << std::endl;
++        exit(EXIT_FAILURE);
++      }
++      config.nclients = n;
++      break;
++    }
++    case 'd':
++      datafile = optarg;
++      break;
++    case 't': {
++#ifdef NOTHREADS
++      std::cerr << "-t: WARNING: Threading disabled at build time, "
++                << "no threads created." << std::endl;
++#else
++      auto n = util::parse_uint(optarg);
++      if (n == -1) {
++        std::cerr << "-t: bad option value: " << optarg << std::endl;
++        exit(EXIT_FAILURE);
++      }
++      config.nthreads = n;
++#endif // NOTHREADS
++      break;
++    }
++    case 'm': {
++      auto n = util::parse_uint(optarg);
++      if (n == -1) {
++        std::cerr << "-m: bad option value: " << optarg << std::endl;
++        exit(EXIT_FAILURE);
++      }
++      config.max_concurrent_streams = n;
++      break;
++    }
++    case 'w':
++    case 'W': {
++      auto n = util::parse_uint(optarg);
++      if (n == -1 || n > 30) {
++        std::cerr << "-" << static_cast<char>(c)
++                  << ": specify the integer in the range [0, 30], inclusive"
++                  << std::endl;
++        exit(EXIT_FAILURE);
++      }
++      if (c == 'w') {
++        config.window_bits = n;
++      } else {
++        config.connection_window_bits = n;
++      }
++      break;
++    }
++    case 'f': {
++      auto n = util::parse_uint_with_unit(optarg);
++      if (n == -1) {
++        std::cerr << "--max-frame-size: bad option value: " << optarg
++                  << std::endl;
++        exit(EXIT_FAILURE);
++      }
++      if (static_cast<uint64_t>(n) < 16_k) {
++        std::cerr << "--max-frame-size: minimum 16384" << std::endl;
++        exit(EXIT_FAILURE);
++      }
++      if (static_cast<uint64_t>(n) > 16_m - 1) {
++        std::cerr << "--max-frame-size: maximum 16777215" << std::endl;
++        exit(EXIT_FAILURE);
++      }
++      config.max_frame_size = n;
++      break;
++    }
++    case 'H': {
++      char *header = optarg;
++      // Skip first possible ':' in the header name
++      char *value = strchr(optarg + 1, ':');
++      if (!value || (header[0] == ':' && header + 1 == value)) {
++        std::cerr << "-H: invalid header: " << optarg << std::endl;
++        exit(EXIT_FAILURE);
++      }
++      *value = 0;
++      value++;
++      while (isspace(*value)) {
++        value++;
++      }
++      if (*value == 0) {
++        // This could also be a valid case for suppressing a header
++        // similar to curl
++        std::cerr << "-H: invalid header - value missing: " << optarg
++                  << std::endl;
++        exit(EXIT_FAILURE);
++      }
++      // Note that there is no processing currently to handle multiple
++      // message-header fields with the same field name
++      config.custom_headers.emplace_back(header, value);
++      util::inp_strlower(config.custom_headers.back().name);
++      break;
++    }
++    case 'i':
++      config.ifile = optarg;
++      break;
++    case 'p': {
++      auto proto = StringRef{optarg};
++      if (util::strieq(StringRef::from_lit(NGHTTP2_CLEARTEXT_PROTO_VERSION_ID),
++                       proto)) {
++        config.no_tls_proto = Config::PROTO_HTTP2;
++      } else if (util::strieq(NGHTTP2_H1_1, proto)) {
++        config.no_tls_proto = Config::PROTO_HTTP1_1;
++      } else {
++        std::cerr << "-p: unsupported protocol " << proto << std::endl;
++        exit(EXIT_FAILURE);
++      }
++      break;
++    }
++    case 'r': {
++      auto n = util::parse_uint(optarg);
++      if (n == -1) {
++        std::cerr << "-r: bad option value: " << optarg << std::endl;
++        exit(EXIT_FAILURE);
++      }
++      if (n == 0) {
++        std::cerr << "-r: the rate at which connections are made "
++                  << "must be positive." << std::endl;
++        exit(EXIT_FAILURE);
++      }
++      config.rate = n;
++      break;
++    }
++    case 'T':
++      config.conn_active_timeout = util::parse_duration_with_unit(optarg);
++      if (!std::isfinite(config.conn_active_timeout)) {
++        std::cerr << "-T: bad value for the conn_active_timeout wait time: "
++                  << optarg << std::endl;
++        exit(EXIT_FAILURE);
++      }
++      break;
++    case 'N':
++      config.conn_inactivity_timeout = util::parse_duration_with_unit(optarg);
++      if (!std::isfinite(config.conn_inactivity_timeout)) {
++        std::cerr << "-N: bad value for the conn_inactivity_timeout wait time: "
++                  << optarg << std::endl;
++        exit(EXIT_FAILURE);
++      }
++      break;
++    case 'B': {
++      auto arg = StringRef{optarg};
++      config.base_uri = "";
++      config.base_uri_unix = false;
++
++      if (util::istarts_with_l(arg, UNIX_PATH_PREFIX)) {
++        // UNIX domain socket path
++        sockaddr_un un;
++
++        auto path = StringRef{std::begin(arg) + str_size(UNIX_PATH_PREFIX),
++                              std::end(arg)};
++
++        if (path.size() == 0 || path.size() + 1 > sizeof(un.sun_path)) {
++          std::cerr << "--base-uri: invalid UNIX domain socket path: " << arg
++                    << std::endl;
++          exit(EXIT_FAILURE);
++        }
++
++        config.base_uri_unix = true;
++
++        auto &unix_addr = config.unix_addr;
++        std::copy(std::begin(path), std::end(path), unix_addr.sun_path);
++        unix_addr.sun_path[path.size()] = '\0';
++        unix_addr.sun_family = AF_UNIX;
++
++        break;
++      }
++
++      if (!parse_base_uri(arg)) {
++        std::cerr << "--base-uri: invalid base URI: " << arg << std::endl;
++        exit(EXIT_FAILURE);
++      }
++
++      config.base_uri = arg.str();
++      break;
++    }
++    case 'D':
++      config.duration = util::parse_duration_with_unit(optarg);
++      if (!std::isfinite(config.duration)) {
++        std::cerr << "-D: value error " << optarg << std::endl;
++        exit(EXIT_FAILURE);
++      }
++      break;
++    case 'v':
++      config.verbose = true;
++      break;
++    case 'h':
++      print_help(std::cout);
++      exit(EXIT_SUCCESS);
++    case '?':
++      util::show_candidates(argv[optind - 1], long_options);
++      exit(EXIT_FAILURE);
++    case 0:
++      switch (flag) {
++      case 1:
++        // version option
++        print_version(std::cout);
++        exit(EXIT_SUCCESS);
++      case 2:
++        // ciphers option
++        config.ciphers = optarg;
++        break;
++      case 3:
++        // timing-script option
++        config.ifile = optarg;
++        config.timing_script = true;
++        break;
++      case 4:
++        // npn-list option
++        config.npn_list = util::parse_config_str_list(StringRef{optarg});
++        break;
++      case 5:
++        // rate-period
++        config.rate_period = util::parse_duration_with_unit(optarg);
++        if (!std::isfinite(config.rate_period)) {
++          std::cerr << "--rate-period: value error " << optarg << std::endl;
++          exit(EXIT_FAILURE);
++        }
++        break;
++      case 6:
++        // --h1
++        config.npn_list =
++            util::parse_config_str_list(StringRef::from_lit("http/1.1"));
++        config.no_tls_proto = Config::PROTO_HTTP1_1;
++        break;
++      case 7:
++        // --header-table-size
++        if (parse_header_table_size(config.header_table_size,
++                                    "header-table-size", optarg) != 0) {
++          exit(EXIT_FAILURE);
++        }
++        break;
++      case 8:
++        // --encoder-header-table-size
++        if (parse_header_table_size(config.encoder_header_table_size,
++                                    "encoder-header-table-size", optarg) != 0) {
++          exit(EXIT_FAILURE);
++        }
++        break;
++      case 9:
++        // --warm-up-time
++        config.warm_up_time = util::parse_duration_with_unit(optarg);
++        if (!std::isfinite(config.warm_up_time)) {
++          std::cerr << "--warm-up-time: value error " << optarg << std::endl;
++          exit(EXIT_FAILURE);
++        }
++        break;
++      case 10:
++        // --log-file
++        logfile = optarg;
++        break;
++      case 11: {
++        // --connect-to
++        auto p = util::split_hostport(StringRef{optarg});
++        int64_t port = 0;
++        if (p.first.empty() ||
++            (!p.second.empty() && (port = util::parse_uint(p.second)) == -1)) {
++          std::cerr << "--connect-to: Invalid value " << optarg << std::endl;
++          exit(EXIT_FAILURE);
++        }
++        config.connect_to_host = p.first.str();
++        config.connect_to_port = port;
++        break;
++      }
++      case 12: {
++        char *end;
++        auto v = std::strtod(optarg, &end);
++        if (end == optarg || *end != '\0' || !std::isfinite(v) ||
++            1. / v < 1e-6) {
++          std::cerr << "--rps: Invalid value " << optarg << std::endl;
++          exit(EXIT_FAILURE);
++        }
++        config.rps = v;
++        break;
++      }
++      case 13:
++        // --groups
++        config.groups = optarg;
++        break;
++      case 14:
++        // --tls13-ciphers
++        config.tls13_ciphers = optarg;
++        break;
++      case 15:
++        // --no-udp-gso
++        config.no_udp_gso = true;
++        break;
++      case 16:
++        // --qlog-file-base
++        qlog_base = optarg;
++        break;
++      case 17: {
++        // --max-udp-payload-size
++        auto n = util::parse_uint_with_unit(optarg);
++        if (n == -1) {
++          std::cerr << "--max-udp-payload-size: bad option value: " << optarg
++                    << std::endl;
++          exit(EXIT_FAILURE);
++        }
++        if (static_cast<uint64_t>(n) > 64_k) {
++          std::cerr << "--max-udp-payload-size: must not exceed 65536"
++                    << std::endl;
++          exit(EXIT_FAILURE);
++        }
++        config.max_udp_payload_size = n;
++        break;
++      }
++      case 18:
++        // --ktls
++        config.ktls = true;
++        break;
++      }
++      break;
++    default:
++      break;
++    }
++  }
++
++  if (argc == optind) {
++    if (config.ifile.empty()) {
++      std::cerr << "no URI or input file given" << std::endl;
++      exit(EXIT_FAILURE);
++    }
++  }
++
++  if (config.nclients == 0) {
++    std::cerr << "-c: the number of clients must be strictly greater than 0."
++              << std::endl;
++    exit(EXIT_FAILURE);
++  }
++
++  if (config.npn_list.empty()) {
++    config.npn_list =
++        util::parse_config_str_list(StringRef::from_lit(DEFAULT_NPN_LIST));
++  }
++
++  // serialize the APLN tokens
++  for (auto &proto : config.npn_list) {
++    proto.insert(proto.begin(), static_cast<unsigned char>(proto.size()));
++  }
++
++  std::vector<std::string> reqlines;
++
++  if (config.ifile.empty()) {
++    std::vector<std::string> uris;
++    std::copy(&argv[optind], &argv[argc], std::back_inserter(uris));
++    reqlines = parse_uris(std::begin(uris), std::end(uris));
++  } else {
++    std::vector<std::string> uris;
++    if (!config.timing_script) {
++      if (config.ifile == "-") {
++        uris = read_uri_from_file(std::cin);
++      } else {
++        std::ifstream infile(config.ifile);
++        if (!infile) {
++          std::cerr << "cannot read input file: " << config.ifile << std::endl;
++          exit(EXIT_FAILURE);
++        }
++
++        uris = read_uri_from_file(infile);
++      }
++    } else {
++      if (config.ifile == "-") {
++        read_script_from_file(std::cin, config.timings, uris);
++      } else {
++        std::ifstream infile(config.ifile);
++        if (!infile) {
++          std::cerr << "cannot read input file: " << config.ifile << std::endl;
++          exit(EXIT_FAILURE);
++        }
++
++        read_script_from_file(infile, config.timings, uris);
++      }
++
++      if (nreqs_set_manually) {
++        if (config.nreqs > uris.size()) {
++          std::cerr << "-n: the number of requests must be less than or equal "
++                       "to the number of timing script entries. Setting number "
++                       "of requests to "
++                    << uris.size() << std::endl;
++
++          config.nreqs = uris.size();
++        }
++      } else {
++        config.nreqs = uris.size();
++      }
++    }
++
++    reqlines = parse_uris(std::begin(uris), std::end(uris));
++  }
++
++  if (reqlines.empty()) {
++    std::cerr << "No URI given" << std::endl;
++    exit(EXIT_FAILURE);
++  }
++
++  if (config.is_timing_based_mode() && config.is_rate_mode()) {
++    std::cerr << "-r, -D: they are mutually exclusive." << std::endl;
++    exit(EXIT_FAILURE);
++  }
++
++  if (config.timing_script && config.rps_enabled()) {
++    std::cerr << "--timing-script-file, --rps: they are mutually exclusive."
++              << std::endl;
++    exit(EXIT_FAILURE);
++  }
++
++  if (config.nreqs == 0 && !config.is_timing_based_mode()) {
++    std::cerr << "-n: the number of requests must be strictly greater than 0 "
++                 "if timing-based test is not being run."
++              << std::endl;
++    exit(EXIT_FAILURE);
++  }
++
++  if (config.max_concurrent_streams == 0) {
++    std::cerr << "-m: the max concurrent streams must be strictly greater "
++              << "than 0." << std::endl;
++    exit(EXIT_FAILURE);
++  }
++
++  if (config.nthreads == 0) {
++    std::cerr << "-t: the number of threads must be strictly greater than 0."
++              << std::endl;
++    exit(EXIT_FAILURE);
++  }
++
++  if (config.nthreads > std::thread::hardware_concurrency()) {
++    std::cerr << "-t: warning: the number of threads is greater than hardware "
++              << "cores." << std::endl;
++  }
++
++  // With timing script, we don't distribute config.nreqs to each
++  // client or thread.
++  if (!config.timing_script && config.nreqs < config.nclients &&
++      !config.is_timing_based_mode()) {
++    std::cerr << "-n, -c: the number of requests must be greater than or "
++              << "equal to the clients." << std::endl;
++    exit(EXIT_FAILURE);
++  }
++
++  if (config.nclients < config.nthreads) {
++    std::cerr << "-c, -t: the number of clients must be greater than or equal "
++              << "to the number of threads." << std::endl;
++    exit(EXIT_FAILURE);
++  }
++
++  if (config.is_timing_based_mode()) {
++    config.nreqs = 0;
++  }
++
++  if (config.is_rate_mode()) {
++    if (config.rate < config.nthreads) {
++      std::cerr << "-r, -t: the connection rate must be greater than or equal "
++                << "to the number of threads." << std::endl;
++      exit(EXIT_FAILURE);
++    }
++
++    if (config.rate > config.nclients) {
++      std::cerr << "-r, -c: the connection rate must be smaller than or equal "
++                   "to the number of clients."
++                << std::endl;
++      exit(EXIT_FAILURE);
++    }
++  }
++
++  if (!datafile.empty()) {
++    config.data_fd = open(datafile.c_str(), O_RDONLY | O_BINARY);
++    if (config.data_fd == -1) {
++      std::cerr << "-d: Could not open file " << datafile << std::endl;
++      exit(EXIT_FAILURE);
++    }
++    struct stat data_stat;
++    if (fstat(config.data_fd, &data_stat) == -1) {
++      std::cerr << "-d: Could not stat file " << datafile << std::endl;
++      exit(EXIT_FAILURE);
++    }
++    config.data_length = data_stat.st_size;
++    auto addr = mmap(nullptr, config.data_length, PROT_READ, MAP_SHARED,
++                     config.data_fd, 0);
++    if (addr == MAP_FAILED) {
++      std::cerr << "-d: Could not mmap file " << datafile << std::endl;
++      exit(EXIT_FAILURE);
++    }
++    config.data = static_cast<uint8_t *>(addr);
++  }
++
++  if (!logfile.empty()) {
++    config.log_fd = open(logfile.c_str(), O_WRONLY | O_CREAT | O_APPEND,
++                         S_IRUSR | S_IWUSR | S_IRGRP);
++    if (config.log_fd == -1) {
++      std::cerr << "--log-file: Could not open file " << logfile << std::endl;
++      exit(EXIT_FAILURE);
++    }
++  }
++
++  if (!qlog_base.empty()) {
++    if (!config.is_quic()) {
++      std::cerr
++          << "Warning: --qlog-file-base: only effective in quic, ignoring."
++          << std::endl;
++    } else {
++#ifdef ENABLE_HTTP3
++      config.qlog_file_base = qlog_base;
++#endif // ENABLE_HTTP3
++    }
++  }
++
++  struct sigaction act {};
++  act.sa_handler = SIG_IGN;
++  sigaction(SIGPIPE, &act, nullptr);
++
++  auto ssl_ctx = SSL_CTX_new(TLS_client_method());
++  if (!ssl_ctx) {
++    std::cerr << "Failed to create SSL_CTX: "
++              << ERR_error_string(ERR_get_error(), nullptr) << std::endl;
++    exit(EXIT_FAILURE);
++  }
++
++  auto ssl_opts = (SSL_OP_ALL & ~SSL_OP_DONT_INSERT_EMPTY_FRAGMENTS) |
++                  SSL_OP_NO_SSLv2 | SSL_OP_NO_SSLv3 | SSL_OP_NO_COMPRESSION |
++                  SSL_OP_NO_SESSION_RESUMPTION_ON_RENEGOTIATION;
++
++#ifdef SSL_OP_ENABLE_KTLS
++  if (config.ktls) {
++    ssl_opts |= SSL_OP_ENABLE_KTLS;
++  }
++#endif // SSL_OP_ENABLE_KTLS
++
++  SSL_CTX_set_options(ssl_ctx, ssl_opts);
++  SSL_CTX_set_mode(ssl_ctx, SSL_MODE_AUTO_RETRY);
++  SSL_CTX_set_mode(ssl_ctx, SSL_MODE_RELEASE_BUFFERS);
++
++  if (config.is_quic()) {
++#ifdef ENABLE_HTTP3
++#  ifdef HAVE_LIBNGTCP2_CRYPTO_QUICTLS
++    if (ngtcp2_crypto_quictls_configure_client_context(ssl_ctx) != 0) {
++      std::cerr << "ngtcp2_crypto_quictls_configure_client_context failed"
++                << std::endl;
++      exit(EXIT_FAILURE);
++    }
++#  endif // HAVE_LIBNGTCP2_CRYPTO_QUICTLS
++#  ifdef HAVE_LIBNGTCP2_CRYPTO_BORINGSSL
++    if (ngtcp2_crypto_boringssl_configure_client_context(ssl_ctx) != 0) {
++      std::cerr << "ngtcp2_crypto_boringssl_configure_client_context failed"
++                << std::endl;
++      exit(EXIT_FAILURE);
++    }
++#  endif // HAVE_LIBNGTCP2_CRYPTO_BORINGSSL
++#endif   // ENABLE_HTTP3
++  } else if (nghttp2::tls::ssl_ctx_set_proto_versions(
++                 ssl_ctx, nghttp2::tls::NGHTTP2_TLS_MIN_VERSION,
++                 nghttp2::tls::NGHTTP2_TLS_MAX_VERSION) != 0) {
++    std::cerr << "Could not set TLS versions" << std::endl;
++    exit(EXIT_FAILURE);
++  }
++
++  if (SSL_CTX_set_cipher_list(ssl_ctx, config.ciphers.c_str()) == 0) {
++    std::cerr << "SSL_CTX_set_cipher_list with " << config.ciphers
++              << " failed: " << ERR_error_string(ERR_get_error(), nullptr)
++              << std::endl;
++    exit(EXIT_FAILURE);
++  }
++
++#if OPENSSL_1_1_1_API && !defined(OPENSSL_IS_BORINGSSL)
++  if (SSL_CTX_set_ciphersuites(ssl_ctx, config.tls13_ciphers.c_str()) == 0) {
++    std::cerr << "SSL_CTX_set_ciphersuites with " << config.tls13_ciphers
++              << " failed: " << ERR_error_string(ERR_get_error(), nullptr)
++              << std::endl;
++    exit(EXIT_FAILURE);
++  }
++#endif // OPENSSL_1_1_1_API && !defined(OPENSSL_IS_BORINGSSL)
++
++#if OPENSSL_1_1_1_API && !defined(OPENSSL_IS_BORINGSSL)
++  if (SSL_CTX_set1_groups_list(ssl_ctx, config.groups.c_str()) != 1) {
++    std::cerr << "SSL_CTX_set1_groups_list failed" << std::endl;
++    exit(EXIT_FAILURE);
++  }
++#else  // !(OPENSSL_1_1_1_API && !defined(OPENSSL_IS_BORINGSSL))
++  if (SSL_CTX_set1_curves_list(ssl_ctx, config.groups.c_str()) != 1) {
++    std::cerr << "SSL_CTX_set1_curves_list failed" << std::endl;
++    exit(EXIT_FAILURE);
++  }
++#endif // !(OPENSSL_1_1_1_API && !defined(OPENSSL_IS_BORINGSSL))
++
++#ifndef OPENSSL_NO_NEXTPROTONEG
++  SSL_CTX_set_next_proto_select_cb(ssl_ctx, client_select_next_proto_cb,
++                                   nullptr);
++#endif // !OPENSSL_NO_NEXTPROTONEG
++
++#if OPENSSL_VERSION_NUMBER >= 0x10002000L
++  std::vector<unsigned char> proto_list;
++  for (const auto &proto : config.npn_list) {
++    std::copy_n(proto.c_str(), proto.size(), std::back_inserter(proto_list));
++  }
++
++  SSL_CTX_set_alpn_protos(ssl_ctx, proto_list.data(), proto_list.size());
++#endif // OPENSSL_VERSION_NUMBER >= 0x10002000L
++
++#if OPENSSL_1_1_1_API
++  auto keylog_filename = getenv("SSLKEYLOGFILE");
++  if (keylog_filename) {
++    keylog_file.open(keylog_filename, std::ios_base::app);
++    if (keylog_file) {
++      SSL_CTX_set_keylog_callback(ssl_ctx, keylog_callback);
++    }
++  }
++#endif // OPENSSL_1_1_1_API
++
++  std::string user_agent = "h2load nghttp2/" NGHTTP2_VERSION;
++  Headers shared_nva;
++  shared_nva.emplace_back(":scheme", config.scheme);
++  if (config.port != config.default_port) {
++    shared_nva.emplace_back(":authority",
++                            config.host + ":" + util::utos(config.port));
++  } else {
++    shared_nva.emplace_back(":authority", config.host);
++  }
++  shared_nva.emplace_back(":method", config.data_fd == -1 ? "GET" : "POST");
++  shared_nva.emplace_back("user-agent", user_agent);
++
++  // list header fields that can be overridden.
++  auto override_hdrs = make_array<std::string>(":authority", ":host", ":method",
++                                               ":scheme", "user-agent");
++
++  for (auto &kv : config.custom_headers) {
++    if (std::find(std::begin(override_hdrs), std::end(override_hdrs),
++                  kv.name) != std::end(override_hdrs)) {
++      // override header
++      for (auto &nv : shared_nva) {
++        if ((nv.name == ":authority" && kv.name == ":host") ||
++            (nv.name == kv.name)) {
++          nv.value = kv.value;
++        }
++      }
++    } else {
++      // add additional headers
++      shared_nva.push_back(kv);
++    }
++  }
++
++  std::string content_length_str;
++  if (config.data_fd != -1) {
++    content_length_str = util::utos(config.data_length);
++  }
++
++  auto method_it =
++      std::find_if(std::begin(shared_nva), std::end(shared_nva),
++                   [](const Header &nv) { return nv.name == ":method"; });
++  assert(method_it != std::end(shared_nva));
++
++  config.h1reqs.reserve(reqlines.size());
++  config.nva.reserve(reqlines.size());
++
++  for (auto &req : reqlines) {
++    // For HTTP/1.1
++    auto h1req = (*method_it).value;
++    h1req += ' ';
++    h1req += req;
++    h1req += " HTTP/1.1\r\n";
++    for (auto &nv : shared_nva) {
++      if (nv.name == ":authority") {
++        h1req += "Host: ";
++        h1req += nv.value;
++        h1req += "\r\n";
++        continue;
++      }
++      if (nv.name[0] == ':') {
++        continue;
++      }
++      h1req += nv.name;
++      h1req += ": ";
++      h1req += nv.value;
++      h1req += "\r\n";
++    }
++
++    if (!content_length_str.empty()) {
++      h1req += "Content-Length: ";
++      h1req += content_length_str;
++      h1req += "\r\n";
++    }
++    h1req += "\r\n";
++
++    config.h1reqs.push_back(std::move(h1req));
++
++    // For nghttp2
++    std::vector<nghttp2_nv> nva;
++    // 2 for :path, and possible content-length
++    nva.reserve(2 + shared_nva.size());
++
++    nva.push_back(http2::make_nv_ls(":path", req));
++
++    for (auto &nv : shared_nva) {
++      nva.push_back(http2::make_nv(nv.name, nv.value, false));
++    }
++
++    if (!content_length_str.empty()) {
++      nva.push_back(http2::make_nv(StringRef::from_lit("content-length"),
++                                   StringRef{content_length_str}));
++    }
++
++    config.nva.push_back(std::move(nva));
++  }
++
++  // Don't DOS our server!
++  if (config.host == "nghttp2.org") {
++    std::cerr << "Using h2load against public server " << config.host
++              << " should be prohibited." << std::endl;
++    exit(EXIT_FAILURE);
++  }
++
++  resolve_host();
++
++  std::cout << "starting benchmark..." << std::endl;
++
++  std::vector<std::unique_ptr<Worker>> workers;
++  workers.reserve(config.nthreads);
++
++#ifndef NOTHREADS
++  size_t nreqs_per_thread = 0;
++  ssize_t nreqs_rem = 0;
++
++  if (!config.timing_script) {
++    nreqs_per_thread = config.nreqs / config.nthreads;
++    nreqs_rem = config.nreqs % config.nthreads;
++  }
++
++  size_t nclients_per_thread = config.nclients / config.nthreads;
++  ssize_t nclients_rem = config.nclients % config.nthreads;
++
++  size_t rate_per_thread = config.rate / config.nthreads;
++  ssize_t rate_per_thread_rem = config.rate % config.nthreads;
++
++  size_t max_samples_per_thread =
++      std::max(static_cast<size_t>(256), MAX_SAMPLES / config.nthreads);
++
++  std::mutex mu;
++  std::condition_variable cv;
++  auto ready = false;
++
++  std::vector<std::future<void>> futures;
++  for (size_t i = 0; i < config.nthreads; ++i) {
++    auto rate = rate_per_thread;
++    if (rate_per_thread_rem > 0) {
++      --rate_per_thread_rem;
++      ++rate;
++    }
++    auto nclients = nclients_per_thread;
++    if (nclients_rem > 0) {
++      --nclients_rem;
++      ++nclients;
++    }
++
++    size_t nreqs;
++    if (config.timing_script) {
++      // With timing script, each client issues config.nreqs requests.
++      // We divide nreqs by number of clients in Worker ctor to
++      // distribute requests to those clients evenly, so multiply
++      // config.nreqs here by config.nclients.
++      nreqs = config.nreqs * nclients;
++    } else {
++      nreqs = nreqs_per_thread;
++      if (nreqs_rem > 0) {
++        --nreqs_rem;
++        ++nreqs;
++      }
++    }
++
++    workers.push_back(create_worker(i, ssl_ctx, nreqs, nclients, rate,
++                                    max_samples_per_thread));
++    auto &worker = workers.back();
++    futures.push_back(
++        std::async(std::launch::async, [&worker, &mu, &cv, &ready]() {
++          {
++            std::unique_lock<std::mutex> ulk(mu);
++            cv.wait(ulk, [&ready] { return ready; });
++          }
++          worker->run();
++        }));
++  }
++
++  {
++    std::lock_guard<std::mutex> lg(mu);
++    ready = true;
++    cv.notify_all();
++  }
++
++  auto start = std::chrono::steady_clock::now();
++
++  for (auto &fut : futures) {
++    fut.get();
++  }
++
++#else  // NOTHREADS
++  auto rate = config.rate;
++  auto nclients = config.nclients;
++  auto nreqs =
++      config.timing_script ? config.nreqs * config.nclients : config.nreqs;
++
++  workers.push_back(
++      create_worker(0, ssl_ctx, nreqs, nclients, rate, MAX_SAMPLES));
++
++  auto start = std::chrono::steady_clock::now();
++
++  workers.back()->run();
++#endif // NOTHREADS
++
++  auto end = std::chrono::steady_clock::now();
++  auto duration =
++      std::chrono::duration_cast<std::chrono::microseconds>(end - start);
++
++  Stats stats(0, 0);
++  for (const auto &w : workers) {
++    const auto &s = w->stats;
++
++    stats.req_todo += s.req_todo;
++    stats.req_started += s.req_started;
++    stats.req_done += s.req_done;
++    stats.req_timedout += s.req_timedout;
++    stats.req_success += s.req_success;
++    stats.req_status_success += s.req_status_success;
++    stats.req_failed += s.req_failed;
++    stats.req_error += s.req_error;
++    stats.bytes_total += s.bytes_total;
++    stats.bytes_head += s.bytes_head;
++    stats.bytes_head_decomp += s.bytes_head_decomp;
++    stats.bytes_body += s.bytes_body;
++    stats.udp_dgram_recv += s.udp_dgram_recv;
++    stats.udp_dgram_sent += s.udp_dgram_sent;
++
++    for (size_t i = 0; i < stats.status.size(); ++i) {
++      stats.status[i] += s.status[i];
++    }
++  }
++
++  auto ts = process_time_stats(workers);
++
++  // Requests which have not been issued due to connection errors, are
++  // counted towards req_failed and req_error.
++  auto req_not_issued =
++      (stats.req_todo - stats.req_status_success - stats.req_failed);
++  stats.req_failed += req_not_issued;
++  stats.req_error += req_not_issued;
++
++  // UI is heavily inspired by weighttp[1] and wrk[2]
++  //
++  // [1] https://github.com/lighttpd/weighttp
++  // [2] https://github.com/wg/wrk
++  double rps = 0;
++  int64_t bps = 0;
++  if (duration.count() > 0) {
++    if (config.is_timing_based_mode()) {
++      // we only want to consider the main duration if warm-up is given
++      rps = stats.req_success / config.duration;
++      bps = stats.bytes_total / config.duration;
++    } else {
++      auto secd = std::chrono::duration_cast<
++          std::chrono::duration<double, std::chrono::seconds::period>>(
++          duration);
++      rps = stats.req_success / secd.count();
++      bps = stats.bytes_total / secd.count();
++    }
++  }
++
++  double header_space_savings = 0.;
++  if (stats.bytes_head_decomp > 0) {
++    header_space_savings =
++        1. - static_cast<double>(stats.bytes_head) / stats.bytes_head_decomp;
++  }
++
++  std::cout << std::fixed << std::setprecision(2) << R"(
++finished in )"
++            << util::format_duration(duration) << ", " << rps << " req/s, "
++            << util::utos_funit(bps) << R"(B/s
++requests: )" << stats.req_todo
++            << " total, " << stats.req_started << " started, " << stats.req_done
++            << " done, " << stats.req_status_success << " succeeded, "
++            << stats.req_failed << " failed, " << stats.req_error
++            << " errored, " << stats.req_timedout << R"( timeout
++status codes: )"
++            << stats.status[2] << " 2xx, " << stats.status[3] << " 3xx, "
++            << stats.status[4] << " 4xx, " << stats.status[5] << R"( 5xx
++traffic: )" << util::utos_funit(stats.bytes_total)
++            << "B (" << stats.bytes_total << ") total, "
++            << util::utos_funit(stats.bytes_head) << "B (" << stats.bytes_head
++            << ") headers (space savings " << header_space_savings * 100
++            << "%), " << util::utos_funit(stats.bytes_body) << "B ("
++            << stats.bytes_body << R"() data)" << std::endl;
++#ifdef ENABLE_HTTP3
++  if (config.is_quic()) {
++    std::cout << "UDP datagram: " << stats.udp_dgram_sent << " sent, "
++              << stats.udp_dgram_recv << " received" << std::endl;
++  }
++#endif // ENABLE_HTTP3
++  std::cout
++      << R"(                     min         max         mean         sd        +/- sd
++time for request: )"
++      << std::setw(10) << util::format_duration(ts.request.min) << "  "
++      << std::setw(10) << util::format_duration(ts.request.max) << "  "
++      << std::setw(10) << util::format_duration(ts.request.mean) << "  "
++      << std::setw(10) << util::format_duration(ts.request.sd) << std::setw(9)
++      << util::dtos(ts.request.within_sd) << "%"
++      << "\ntime for connect: " << std::setw(10)
++      << util::format_duration(ts.connect.min) << "  " << std::setw(10)
++      << util::format_duration(ts.connect.max) << "  " << std::setw(10)
++      << util::format_duration(ts.connect.mean) << "  " << std::setw(10)
++      << util::format_duration(ts.connect.sd) << std::setw(9)
++      << util::dtos(ts.connect.within_sd) << "%"
++      << "\ntime to 1st byte: " << std::setw(10)
++      << util::format_duration(ts.ttfb.min) << "  " << std::setw(10)
++      << util::format_duration(ts.ttfb.max) << "  " << std::setw(10)
++      << util::format_duration(ts.ttfb.mean) << "  " << std::setw(10)
++      << util::format_duration(ts.ttfb.sd) << std::setw(9)
++      << util::dtos(ts.ttfb.within_sd) << "%"
++      << "\nreq/s           : " << std::setw(10) << ts.rps.min << "  "
++      << std::setw(10) << ts.rps.max << "  " << std::setw(10) << ts.rps.mean
++      << "  " << std::setw(10) << ts.rps.sd << std::setw(9)
++      << util::dtos(ts.rps.within_sd) << "%" << std::endl;
++
++  SSL_CTX_free(ssl_ctx);
++
++  if (config.log_fd != -1) {
++    close(config.log_fd);
++  }
++
++  return 0;
++}
++ 
++} // namespace h2load
++
++int main(int argc, char **argv) { 
++  return h2load::main(argc, argv); 
++}
++
+diff --git a/src/h2load_verto.h b/src/h2load_verto.h
+new file mode 100644
+index 0000000..84b2789
+--- /dev/null
++++ b/src/h2load_verto.h
+@@ -0,0 +1,511 @@
++/*
++ * nghttp2 - HTTP/2 C Library
++ *
++ * Copyright (c) 2014 Tatsuhiro Tsujikawa
++ *
++ * Permission is hereby granted, free of charge, to any person obtaining
++ * a copy of this software and associated documentation files (the
++ * "Software"), to deal in the Software without restriction, including
++ * without limitation the rights to use, copy, modify, merge, publish,
++ * distribute, sublicense, and/or sell copies of the Software, and to
++ * permit persons to whom the Software is furnished to do so, subject to
++ * the following conditions:
++ *
++ * The above copyright notice and this permission notice shall be
++ * included in all copies or substantial portions of the Software.
++ *
++ * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND,
++ * EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF
++ * MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND
++ * NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE
++ * LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION
++ * OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION
++ * WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
++ */
++#ifndef H2LOAD_H
++#define H2LOAD_H
++
++#include "nghttp2_config.h"
++
++#include <sys/types.h>
++#ifdef HAVE_SYS_SOCKET_H
++#  include <sys/socket.h>
++#endif // HAVE_SYS_SOCKET_H
++#ifdef HAVE_NETDB_H
++#  include <netdb.h>
++#endif // HAVE_NETDB_H
++#include <sys/un.h>
++ 
++#include <vector>
++#include <string>
++#include <unordered_map>
++#include <memory>
++#include <chrono>
++#include <array>
++
++#include <nghttp2/nghttp2.h>
++
++#ifdef ENABLE_HTTP3
++#  include <ngtcp2/ngtcp2.h>
++#  include <ngtcp2/ngtcp2_crypto.h>
++#endif // ENABLE_HTTP3
++
++#include <verto-module.h>
++
++#include <openssl/ssl.h>
++
++#include "http2.h"
++#ifdef ENABLE_HTTP3
++#  include "quic.h"
++#endif // ENABLE_HTTP3
++#include "memchunk.h"
++#include "template.h"
++
++using namespace nghttp2;
++
++namespace h2load {
++
++constexpr auto BACKOFF_WRITE_BUFFER_THRES = 16_k;
++
++class Session;
++struct Worker;
++
++struct Config {
++  std::vector<std::vector<nghttp2_nv>> nva;
++  std::vector<std::string> h1reqs;
++  std::vector<std::chrono::steady_clock::duration> timings;
++  nghttp2::Headers custom_headers;
++  std::string scheme;
++  std::string host;
++  std::string connect_to_host;
++  std::string ifile;
++  std::string ciphers;
++  std::string tls13_ciphers;
++  // supported groups (or curves).
++  std::string groups;
++  // length of upload data
++  int64_t data_length;
++  // memory mapped upload data
++  uint8_t *data;
++  addrinfo *addrs;
++  size_t nreqs;
++  size_t nclients;
++  size_t nthreads;
++  // The maximum number of concurrent streams per session.
++  ssize_t max_concurrent_streams;
++  size_t window_bits;
++  size_t connection_window_bits;
++  size_t max_frame_size;
++  // rate at which connections should be made
++  size_t rate;
++  double rate_period;
++  // amount of time for main measurements in timing-based test
++  double duration;
++  // amount of time to wait before starting measurements in timing-based test
++  double warm_up_time;
++  // amount of time to wait for activity on a given connection
++  double conn_active_timeout;
++  // amount of time to wait after the last request is made on a connection
++  double conn_inactivity_timeout;
++  enum { PROTO_HTTP2, PROTO_HTTP1_1 } no_tls_proto;
++  uint32_t header_table_size;
++  uint32_t encoder_header_table_size;
++  // file descriptor for upload data
++  int data_fd;
++  // file descriptor to write per-request stats to.
++  int log_fd;
++  // base file name of qlog output files
++  std::string qlog_file_base;
++  uint16_t port;
++  uint16_t default_port;
++  uint16_t connect_to_port;
++  bool verbose;
++  bool timing_script;
++  std::string base_uri;
++  // true if UNIX domain socket is used.  In this case, base_uri is
++  // not used in usual way.
++  bool base_uri_unix;
++  // used when UNIX domain socket is used (base_uri_unix is true).
++  sockaddr_un unix_addr;
++  // list of supported NPN/ALPN protocol strings in the order of
++  // preference.
++  std::vector<std::string> npn_list;
++  // The number of request per second for each client.
++  double rps;
++  // Disables GSO for UDP connections.
++  bool no_udp_gso;
++  // The maximum UDP datagram payload size to send.
++  size_t max_udp_payload_size;
++  // Enable ktls.
++  bool ktls;
++
++  Config();
++  ~Config();
++
++  bool is_rate_mode() const;
++  bool is_timing_based_mode() const;
++  bool has_base_uri() const;
++  bool rps_enabled() const;
++  bool is_quic() const;
++};
++
++struct RequestStat {
++  // time point when request was sent
++  std::chrono::steady_clock::time_point request_time;
++  // same, but in wall clock reference frame
++  std::chrono::system_clock::time_point request_wall_time;
++  // time point when stream was closed
++  std::chrono::steady_clock::time_point stream_close_time;
++  // upload data length sent so far
++  int64_t data_offset;
++  // HTTP status code
++  int status;
++  // true if stream was successfully closed.  This means stream was
++  // not reset, but it does not mean HTTP level error (e.g., 404).
++  bool completed;
++};
++
++struct ClientStat {
++  // time client started (i.e., first connect starts)
++  std::chrono::steady_clock::time_point client_start_time;
++  // time client end (i.e., client somehow processed all requests it
++  // is responsible for, and disconnected)
++  std::chrono::steady_clock::time_point client_end_time;
++  // The number of requests completed successful, but not necessarily
++  // means successful HTTP status code.
++  size_t req_success;
++
++  // The following 3 numbers are overwritten each time when connection
++  // is made.
++
++  // time connect starts
++  std::chrono::steady_clock::time_point connect_start_time;
++  // time to connect
++  std::chrono::steady_clock::time_point connect_time;
++  // time to first byte (TTFB)
++  std::chrono::steady_clock::time_point ttfb;
++};
++
++struct SDStat {
++  // min, max, mean and sd (standard deviation)
++  double min, max, mean, sd;
++  // percentage of samples inside mean -/+ sd
++  double within_sd;
++};
++
++struct SDStats {
++  // time for request
++  SDStat request;
++  // time for connect
++  SDStat connect;
++  // time to first byte (TTFB)
++  SDStat ttfb;
++  // request per second for each client
++  SDStat rps;
++};
++
++struct Stats {
++  Stats(size_t req_todo, size_t nclients);
++  // The total number of requests
++  size_t req_todo;
++  // The number of requests issued so far
++  size_t req_started;
++  // The number of requests finished
++  size_t req_done;
++  // The number of requests completed successful, but not necessarily
++  // means successful HTTP status code.
++  size_t req_success;
++  // The number of requests marked as success.  HTTP status code is
++  // also considered as success. This is subset of req_done.
++  size_t req_status_success;
++  // The number of requests failed. This is subset of req_done.
++  size_t req_failed;
++  // The number of requests failed due to network errors. This is
++  // subset of req_failed.
++  size_t req_error;
++  // The number of requests that failed due to timeout.
++  size_t req_timedout;
++  // The number of bytes received on the "wire". If SSL/TLS is used,
++  // this is the number of decrypted bytes the application received.
++  int64_t bytes_total;
++  // The number of bytes received for header fields.  This is
++  // compressed version.
++  int64_t bytes_head;
++  // The number of bytes received for header fields after they are
++  // decompressed.
++  int64_t bytes_head_decomp;
++  // The number of bytes received in DATA frame.
++  int64_t bytes_body;
++  // The number of each HTTP status category, status[i] is status code
++  // in the range [i*100, (i+1)*100).
++  std::array<size_t, 6> status;
++  // The statistics per request
++  std::vector<RequestStat> req_stats;
++  // The statistics per client
++  std::vector<ClientStat> client_stats;
++  // The number of UDP datagrams received.
++  size_t udp_dgram_recv;
++  // The number of UDP datagrams sent.
++  size_t udp_dgram_sent;
++};
++
++enum ClientState { CLIENT_IDLE, CLIENT_CONNECTED };
++
++// This type tells whether the client is in warmup phase or not or is over
++enum class Phase {
++  INITIAL_IDLE,  // Initial idle state before warm-up phase
++  WARM_UP,       // Warm up phase when no measurements are done
++  MAIN_DURATION, // Main measurement phase; if timing-based
++                 // test is not run, this is the default phase
++  DURATION_OVER  // This phase occurs after the measurements are over
++};
++
++struct Client;
++
++// We use reservoir sampling method
++struct Sampling {
++  // maximum number of samples
++  size_t max_samples;
++  // number of samples seen, including discarded samples.
++  size_t n;
++};
++
++struct Worker {
++  MemchunkPool mcpool;
++  std::mt19937 randgen;
++  Stats stats;
++  Sampling request_times_smp;
++  Sampling client_smp;
++  verto_ctx *verto_loop;
++  SSL_CTX *ssl_ctx;
++  Config *config;
++  size_t progress_interval;
++  uint32_t id;
++  bool tls_info_report_done;
++  bool app_info_report_done;
++  size_t nconns_made;
++  // number of clients this worker handles
++  size_t nclients;
++  // number of requests each client issues
++  size_t nreqs_per_client;
++  // at most nreqs_rem clients get an extra request
++  size_t nreqs_rem;
++  size_t rate;
++  // maximum number of samples in this worker thread
++  size_t max_samples;
++  verto_ev *verto_timeout_watcher;
++  // The next client ID this worker assigns
++  uint32_t next_client_id;
++  // Keeps track of the current phase (for timing-based experiment) for the
++  // worker
++  Phase current_phase;
++  // We need to keep track of the clients in order to stop them when needed
++  std::vector<Client *> clients;
++  // This is only active when there is not a bounded number of requests
++  // specified
++  verto_ev *verto_duration_watcher;
++  verto_ev *verto_warmup_watcher;
++
++  Worker(uint32_t id, SSL_CTX *ssl_ctx, size_t nreq_todo, size_t nclients,
++         size_t rate, size_t max_samples, Config *config);
++  ~Worker();
++  Worker(Worker &&o) = default;
++  void run();
++  void sample_req_stat(RequestStat *req_stat);
++  void sample_client_stat(ClientStat *cstat);
++  void report_progress();
++  void report_rate_progress();
++  // This function calls the destructors of all the clients.
++  void stop_all_clients();
++  // This function frees a client from the list of clients for this Worker.
++  void free_client(Client *);
++};
++
++struct Stream {
++  RequestStat req_stat;
++  int status_success;
++  Stream();
++};
++
++struct Client {
++  DefaultMemchunks wb;
++  std::unordered_map<int32_t, Stream> streams;
++  ClientStat cstat;
++  std::unique_ptr<Session> session;
++  verto_ev *verto_wev;
++  verto_ev *verto_rev;
++  std::function<int(Client &)> readfn, writefn;
++  Worker *worker;
++  SSL *ssl;
++#ifdef ENABLE_HTTP3
++  struct {
++    ngtcp2_crypto_conn_ref conn_ref;
++    verto_ev *verto_pkt_timer;
++    ngtcp2_conn *conn;
++    ngtcp2_ccerr last_error;
++    bool close_requested;
++    FILE *qlog_file;
++
++    struct {
++      bool send_blocked;
++      size_t num_blocked;
++      size_t num_blocked_sent;
++      struct {
++        Address remote_addr;
++        const uint8_t *data;
++        size_t datalen;
++        size_t gso_size;
++      } blocked[2];
++      std::unique_ptr<uint8_t[]> data;
++    } tx;
++  } quic;
++#endif // ENABLE_HTTP3
++  verto_ev *verto_request_timeout_watcher;
++  addrinfo *next_addr;
++  // Address for the current address.  When try_new_connection() is
++  // used and current_addr is not nullptr, it is used instead of
++  // trying next address though next_addr.  To try new address, set
++  // nullptr to current_addr before calling connect().
++  addrinfo *current_addr;
++  size_t reqidx;
++  ClientState state;
++  // The number of requests this client has to issue.
++  size_t req_todo;
++  // The number of requests left to issue
++  size_t req_left;
++  // The number of requests currently have started, but not abandoned
++  // or finished.
++  size_t req_inflight;
++  // The number of requests this client has issued so far.
++  size_t req_started;
++  // The number of requests this client has done so far.
++  size_t req_done;
++  // The client id per worker
++  uint32_t id;
++  int fd;
++  Address local_addr;
++  verto_ev *verto_conn_active_watcher;
++  verto_ev *verto_conn_inactivity_watcher;
++  std::string selected_proto;
++  bool new_connection_requested;
++  // true if the current connection will be closed, and no more new
++  // request cannot be processed.
++  bool final;
++  // rps_watcher is a timer to invoke callback periodically to
++  // generate a new request.
++  verto_ev *verto_rps_watcher;
++  // The timestamp that starts the period which contributes to the
++  // next request generation.
++  std::chrono::steady_clock::time_point rps_duration_started;
++  // The number of requests allowed by rps, but limited by stream
++  // concurrency.
++  size_t rps_req_pending;
++  // The number of in-flight streams.  req_inflight has similar value
++  // but it only measures requests made during Phase::MAIN_DURATION.
++  // rps_req_inflight measures the number of requests in all phases,
++  // and it is only used if --rps is given.
++  size_t rps_req_inflight;
++
++  enum { ERR_CONNECT_FAIL = -100 };
++
++  Client(uint32_t id, Worker *worker, size_t req_todo);
++  ~Client();
++  int make_socket(addrinfo *addr);
++  int connect();
++  void disconnect();
++  void fail();
++  // Call this function when do_read() returns -1.  This function
++  // tries to connect to the remote host again if it is requested.  If
++  // so, this function returns 0, and this object should be retained.
++  // Otherwise, this function returns -1, and this object should be
++  // deleted.
++  int try_again_or_fail();
++  void timeout();
++  void restart_timeout();
++  int submit_request();
++  void process_request_failure();
++  void process_timedout_streams();
++  void process_abandoned_streams();
++  void report_tls_info();
++  void report_app_info();
++  void terminate_session();
++  // Asks client to create new connection, instead of just fail.
++  void try_new_connection();
++
++  int do_read();
++  int do_write();
++
++  // low-level I/O callback functions called by do_read/do_write
++  int connected();
++  int read_clear();
++  int write_clear();
++  int tls_handshake();
++  int read_tls();
++  int write_tls();
++
++  int on_read(const uint8_t *data, size_t len);
++  int on_write();
++
++  int connection_made();
++
++  void on_request(int32_t stream_id);
++  void on_header(int32_t stream_id, const uint8_t *name, size_t namelen,
++                 const uint8_t *value, size_t valuelen);
++  void on_status_code(int32_t stream_id, uint16_t status);
++  // |success| == true means that the request/response was exchanged
++  // |successfully, but it does not mean response carried successful
++  // |HTTP status code.
++  void on_stream_close(int32_t stream_id, bool success, bool final = false);
++  // Returns RequestStat for |stream_id|.  This function must be
++  // called after on_request(stream_id), and before
++  // on_stream_close(stream_id, ...).  Otherwise, this will return
++  // nullptr.
++  RequestStat *get_req_stat(int32_t stream_id);
++
++  void record_request_time(RequestStat *req_stat);
++  void record_connect_start_time();
++  void record_connect_time();
++  void record_ttfb();
++  void clear_connect_times();
++  void record_client_start_time();
++  void record_client_end_time();
++
++  void signal_write();
++
++#ifdef ENABLE_HTTP3
++  // QUIC
++  int quic_init(const sockaddr *local_addr, socklen_t local_addrlen,
++                const sockaddr *remote_addr, socklen_t remote_addrlen);
++  void quic_free();
++  int read_quic();
++  int write_quic();
++  int write_udp(const sockaddr *addr, socklen_t addrlen, const uint8_t *data,
++                size_t datalen, size_t gso_size);
++  void on_send_blocked(const ngtcp2_addr &remote_addr, const uint8_t *data,
++                       size_t datalen, size_t gso_size);
++  int send_blocked_packet();
++  void quic_close_connection();
++
++  int quic_handshake_completed();
++  int quic_recv_stream_data(uint32_t flags, int64_t stream_id,
++                            const uint8_t *data, size_t datalen);
++  int quic_acked_stream_data_offset(int64_t stream_id, size_t datalen);
++  int quic_stream_close(int64_t stream_id, uint64_t app_error_code);
++  int quic_stream_reset(int64_t stream_id, uint64_t app_error_code);
++  int quic_stream_stop_sending(int64_t stream_id, uint64_t app_error_code);
++  int quic_extend_max_local_streams();
++  int quic_extend_max_stream_data(int64_t stream_id);
++
++  int quic_write_client_handshake(ngtcp2_encryption_level level,
++                                  const uint8_t *data, size_t datalen);
++  int quic_pkt_timeout();
++  void quic_restart_pkt_timer();
++  void quic_write_qlog(const void *data, size_t datalen);
++  int quic_make_http3_session();
++#endif // ENABLE_HTTP3
++};
++
++} // namespace h2load
++
++#endif // H2LOAD_H
++
+-- 
+2.33.0
+
