@@ -37,6 +37,7 @@ macro(_DEFINE_NEW_TEST)
         libifm_nettle
         libifm_libgcrypt
         libifm_libxcrypt
+        libifm_libhv2ev
         libifm_libverto
         gpg-error
         gmp
@@ -47,9 +48,11 @@ macro(_DEFINE_NEW_TEST)
         PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}
         PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/gcrypt
         PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/xcrypt
+        PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/hv2ev
         PUBLIC ${CMAKE_SOURCE_DIR}/src
         PUBLIC ${CMAKE_SOURCE_DIR}/src/gcrypt
         PUBLIC ${CMAKE_SOURCE_DIR}/src/xcrypt
+        PUBLIC ${CMAKE_SOURCE_DIR}/src/hv2ev
         PUBLIC ${CMAKE_SOURCE_DIR}/src/verto
         )
         
@@ -88,6 +91,7 @@ _DEFINE_NEW_TEST(gcrypt_basic_ut gcrypt_basic_testcases)
 _DEFINE_NEW_TEST(xcrypt_basic_ut xcrypt_basic_testcases)
 _DEFINE_NEW_TEST(hmac_ut hmac_testcases)
 _DEFINE_NEW_TEST(gcrypt_basic_cipher_ut gcrypt_basic_cipher_testcases)
+_DEFINE_NEW_TEST(hv2ev_ut hv2ev_testcases)
 _DEFINE_NEW_TEST(verto_ut verto_testcases)
 
 
@@ -101,7 +105,7 @@ target_link_libraries(mock_ut
     ${GTEST_LIBRARY}
     pthread
     )
-add_dependencies(mock_ut sm3_ut md5_ut sha224_ut sha256_ut sha384_ut sha512_ut sha512_224_ut sha512_256_ut gcrypt_md_ut gcrypt_pk_ut aes_ut aes_keywrap_ut cbc_ut gcm_ut rsa_ut gcrypt_basic_ut xcrypt_basic_ut hmac_ut gcrypt_basic_cipher_ut)
+add_dependencies(mock_ut sm3_ut md5_ut sha224_ut sha256_ut sha384_ut sha512_ut sha512_224_ut sha512_256_ut gcrypt_md_ut gcrypt_pk_ut aes_ut aes_keywrap_ut cbc_ut gcm_ut rsa_ut gcrypt_basic_ut xcrypt_basic_ut hmac_ut gcrypt_basic_cipher_ut hv2ev_ut)
 
 # gcrypt benchmark
 add_executable(gcrypt_benchmark gcrypt_benchmark.cpp)

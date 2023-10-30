@@ -45,6 +45,12 @@ else()
   set(LIB_INSTALL_DIR_DEFAULT "lib")
 endif()
 
+if (INCLUDE_INSTALL_DIR)
+  set(INCLUDE_INSTALL_DIR_DEFAULT ${INCLUDE_INSTALL_DIR})
+else()
+  set(INCLUDE_INSTALL_DIR_DEFAULT "include")
+endif()
+
 # check depends libs and headers
 include(cmake/checker.cmake)
 if (CHECKER_RESULT)
@@ -73,10 +79,21 @@ configure_file(
 configure_file(
 	"${CMAKE_CURRENT_SOURCE_DIR}/ifm_nettle.pc.in"
 	"${CMAKE_BINARY_DIR}/conf/ifm_nettle.pc"
+)
+
+configure_file(
 	"${CMAKE_CURRENT_SOURCE_DIR}/ifm_libgcrypt.pc.in"
 	"${CMAKE_BINARY_DIR}/conf/ifm_libgcrypt.pc"
+)
+
+configure_file(
 	"${CMAKE_CURRENT_SOURCE_DIR}/ifm_libxcrypt.pc.in"
 	"${CMAKE_BINARY_DIR}/conf/ifm_libxcrypt.pc"
+)
+
+configure_file(
+  "${CMAKE_CURRENT_SOURCE_DIR}/ifm_libhv2ev.pc.in"
+	"${CMAKE_BINARY_DIR}/conf/ifm_libhv2ev.pc"
 )
 
 add_subdirectory(${CMAKE_CURRENT_SOURCE_DIR}/src)
@@ -121,6 +138,10 @@ install(FILES ${CMAKE_BINARY_DIR}/conf/ifm_libgcrypt.pc
 
 # install all files
 install(FILES ${CMAKE_BINARY_DIR}/conf/ifm_libxcrypt.pc
+	DESTINATION ${LIB_INSTALL_DIR_DEFAULT}/pkgconfig PERMISSIONS OWNER_READ OWNER_WRITE GROUP_READ GROUP_WRITE WORLD_READ WORLD_EXECUTE)
+
+# install all files
+install(FILES ${CMAKE_BINARY_DIR}/conf/ifm_libhv2ev.pc
 	DESTINATION ${LIB_INSTALL_DIR_DEFAULT}/pkgconfig PERMISSIONS OWNER_READ OWNER_WRITE GROUP_READ GROUP_WRITE WORLD_READ WORLD_EXECUTE)
 
 # uninstall

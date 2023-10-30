@@ -1,0 +1,11 @@
+prefix=@CMAKE_INSTALL_PREFIX@
+libdir=@CMAKE_INSTALL_PREFIX@/lib
+localstatedir=@CMAKE_INSTALL_PREFIX@/var
+includedir=@CMAKE_INSTALL_PREFIX@/include
+
+Name: libifm_libhv2ev
+Description: libevent API implemented based on libhv.
+Version: @IFM_NETTLE_VERSION@
+URL: libifm_libhv2ev
+Libs: -L@CMAKE_INSTALL_PREFIX@/lib -lifm_libhv2ev
+Cflags: -I@CMAKE_INSTALL_PREFIX@/include

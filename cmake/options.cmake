@@ -26,6 +26,13 @@ if (ENABLE_LIBIFM_LIBXCRYPT STREQUAL "ON")
     message("${Green}--  Enable libifm_libxcrypt${ColourReset}")
 endif()
 
+option(ENABLE_LIBIFM_LIBHV2EV "enable ifm_libhv2ev libifm_libhv2ev option" ON)
+if (ENABLE_LIBIFM_LIBHV2EV STREQUAL "ON")
+    add_definitions(-DENABLE_LIBIFM_LIBHV2EV=1)
+    set(ENABLE_LIBIFM_LIBHV2EV 1)
+    message("${Green}--  Enable libifm_libhv2ev${ColourReset}")
+endif()
+
 option(ENABLE_LIBIFM_LIBVERTO "enable ifm_libverto libifm_libverto option" ON)
 if (ENABLE_LIBIFM_LIBVERTO STREQUAL "ON")
     add_definitions(-DENABLE_LIBIFM_LIBVERTO=1)
