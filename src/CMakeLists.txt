@@ -38,7 +38,8 @@ set(check_libxcrypt_libs
     ${LIBXCRYPT_LIBRARY}
     )
 
-set(check_libhv_libs
+set(check_libverto_libs
+    ${LIBVERTO_LIBRARY}
     ${LIBHV_LIBRARY}
     )
 
@@ -221,10 +222,10 @@ if (ENABLE_LIBIFM_LIBHV2EV)
 endif()
 
 aux_source_directory(${CMAKE_CURRENT_SOURCE_DIR}/verto verto_srcs)
-# list(APPEND verto_srcs "${CMAKE_CURRENT_SOURCE_DIR}/ifm_utils.c")
 message("--  Get top srcs: " ${verto_srcs})
 
 if (ENABLE_LIBIFM_LIBVERTO)
+    # set libifm_libverto library
     add_library(libifm_libverto SHARED ${verto_srcs})
 
     set(libifm_verto_incs
@@ -235,8 +236,15 @@ if (ENABLE_LIBIFM_LIBVERTO)
     target_include_directories(libifm_libverto
         PUBLIC ${libifm_verto_incs}
         )
+
+    # set libifm_libverto compile flags
     set_target_properties(libifm_libverto PROPERTIES PREFIX "")
-    target_link_libraries(libifm_libverto ${check_libhv_libs} hv)
+    target_link_libraries(libifm_libverto ${check_libverto_libs} verto hv)
+
+    if (CMAKE_TOOLCHAIN_FILE)
+        target_link_directories(libifm_libverto PUBLIC ${CMAKE_LIBRARY_PATH})
+        target_link_libraries(libifm_libverto ${EXTRAL_LINK_LIBS})
+    endif()
 
 
     add_library(libifm_libverto_s STATIC ${verto_srcs})
@@ -247,6 +255,10 @@ if (ENABLE_LIBIFM_LIBVERTO)
     set_target_properties(libifm_libverto_s PROPERTIES PREFIX "")
     set_target_properties(libifm_libverto_s PROPERTIES OUTPUT_NAME libifm_libverto)
 
-    # add_executable(libifm_libverto_e ${ifm_libverto_srcs} ${libifm_libverto_incs})
-    # target_link_libraries(libifm_libverto_e hv)
+    # install all files
+    install(TARGETS libifm_libverto
+        LIBRARY DESTINATION ${LIB_INSTALL_DIR_DEFAULT} PERMISSIONS OWNER_READ OWNER_EXECUTE GROUP_READ GROUP_EXECUTE WORLD_READ WORLD_EXECUTE)
+    install(TARGETS libifm_libverto_s
+        ARCHIVE DESTINATION ${LIB_INSTALL_DIR_DEFAULT} PERMISSIONS OWNER_READ OWNER_EXECUTE GROUP_READ GROUP_EXECUTE WORLD_READ WORLD_EXECUTE)
+        install(FILES verto/ifm_verto.h DESTINATION ${INCLUDE_INSTALL_DIR_DEFAULT} PERMISSIONS OWNER_READ GROUP_READ WORLD_READ)
 endif()

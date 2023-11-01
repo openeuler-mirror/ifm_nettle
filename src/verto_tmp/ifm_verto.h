@@ -32,22 +32,7 @@ extern "C"
 {
 #endif /* __cplusplus */
 
-#define verto_default ifm_verto_default
-#define verto_get_supported_types ifm_verto_get_supported_types
-#define verto_new ifm_verto_new
-#define verto_run ifm_verto_run
-#define verto_break ifm_verto_break
-#define verto_del ifm_verto_del
-#define verto_free ifm_verto_free
-#define verto_cleanup ifm_verto_cleanup
-#define verto_add_io ifm_verto_add_io
-#define verto_add_timeout ifm_verto_add_timeout
-#define verto_add_signal ifm_verto_add_signal
-#define verto_set_private ifm_verto_set_private
-#define verto_get_private ifm_verto_get_private
-
 verto_ctx *ifm_verto_default(const char *impl, verto_ev_type reqtypes);
-verto_ev_type ifm_verto_get_supported_types(verto_ctx *ctx);
 
 verto_ctx *ifm_verto_new(const char *impl, verto_ev_type reqtypes);
 
@@ -61,13 +46,16 @@ void ifm_verto_free(verto_ctx *ctx);
 
 void ifm_verto_cleanup(void);
 
+// TODO: To be add in futurl.
+// verto_ev *verto_add_signal(verto_ctx *ctx, verto_ev_flag flags,
+//                  verto_callback *callback, int signal);
+
 verto_ev *ifm_verto_add_io(verto_ctx *ctx, verto_ev_flag flags,
              verto_callback *callback, int fd);
 
 verto_ev *ifm_verto_add_timeout(verto_ctx *ctx, verto_ev_flag flags,
                   verto_callback *callback, time_t interval);
-verto_ev *ifm_verto_add_signal(verto_ctx *ctx, verto_ev_flag flags,
-                                verto_callback *callback, int signal);
+
 void ifm_verto_set_private(verto_ev *ev, void *priv, verto_callback *free);
 
 void *ifm_verto_get_private(const verto_ev *ev);
@@ -77,4 +65,4 @@ void *ifm_verto_get_private(const verto_ev *ev);
 #endif
 
 
-#endif /* IFM_VERTO_H_ */
+#endif
