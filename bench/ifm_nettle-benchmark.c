@@ -72,6 +72,7 @@ static void die(const char *format, ...)
     int re = vfprintf(stderr, format, args);
     if (re < 0) {
         printf("vf error");
+        va_end(args);
         return;
     }
     va_end(args);
