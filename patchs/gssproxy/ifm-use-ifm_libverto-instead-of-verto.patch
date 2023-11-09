@@ -1,0 +1,74 @@
+From fb461fb41ad77690e7db9a147e483459d5961c49 Mon Sep 17 00:00:00 2001
+From: huangduirong <huangduirong@huawei.com>
+Date: Sat, 4 Nov 2023 22:33:07 +0800
+Subject: [PATCH] ifm use ifm_libverto instead of verto
+
+---
+ configure.ac   | 34 +++++++++++++++++++++++++---------
+ src/gp_proxy.h |  4 ++++
+ 2 files changed, 29 insertions(+), 9 deletions(-)
+
+diff --git a/configure.ac b/configure.ac
+index 8d881bc..1b1980a 100644
+--- a/configure.ac
++++ b/configure.ac
+@@ -135,15 +135,31 @@ WITH_INITSCRIPT
+ if test x$only_gss_module != xyes; then
+     WITH_POPT
+ 
+-    PKG_CHECK_MODULES([VERTO], [libverto >= 0.2.2],
+-      [
+-        AC_CHECK_LIB(verto, verto_free,,
+-            AC_MSG_ERROR(["Error: libverto is not found or lacks verto_free"]))
+-        AC_CHECK_FUNCS(verto_cleanup,,
+-            AC_MSG_WARN(["Warning: libverto lacks verto_cleanup function"]))
+-      ], [
+-        AC_MSG_ERROR([Could not find VERTO headers])
+-      ])
++    AC_ARG_ENABLE([ifm-libverto],
++                [AS_HELP_STRING([--enable-ifm-libverto], [Enable IFM_LIBVERTO support (default is no)])],
++                [use_ifm_libverto="$enableval"],
++                [use_ifm_libverto="no"])
++
++    if test "x$use_ifm_libverto" = "xyes"; then
++        AC_MSG_WARN([IFM_LIBVERTO support is enabled.])
++        PKG_CHECK_MODULES([IFM_LIBVERTO], [ifm_libverto],
++            [LIBS="-lifm_libverto -lverto $LIBS"
++            AC_DEFINE([USE_IFM_LIBVERTO], [1], [Define if IFM_LIBVERTO support is enabled])],],
++            [
++            AC_MSG_ERROR([Could not find IFM_LIBVERTO library])
++            ])
++    else
++        AC_MSG_WARN([IFM_LIBVERTO support is disabled.])
++        #PKG_CHECK_MODULES([VERTO], [libverto >= 0.2.2],
++        #[
++        #    AC_CHECK_LIB(verto, verto_free,,
++        #        AC_MSG_ERROR(["Error: libverto is not found or lacks verto_free"]))
++        #    AC_CHECK_FUNCS(verto_cleanup,,
++        #        AC_MSG_WARN(["Warning: libverto lacks verto_cleanup function"]))
++        #], [
++        #    AC_MSG_ERROR([Could not find VERTO headers])
++        #])
++    fi
+ 
+ 
+     WITH_LIBINI_CONFIG
+diff --git a/src/gp_proxy.h b/src/gp_proxy.h
+index c8b55ef..971686d 100644
+--- a/src/gp_proxy.h
++++ b/src/gp_proxy.h
+@@ -8,7 +8,11 @@
+ #include <stdint.h>
+ #include <gssapi/gssapi_ext.h>
+ #include <gssapi/gssapi_krb5.h>
++#ifndef USE_IFM_LIBVERTO
+ #include "verto.h"
++#else
++#include "ifm_verto.h"
++#endif
+ #include "gp_common.h"
+ #include "gp_selinux.h"
+ 
+-- 
+2.33.0
+
