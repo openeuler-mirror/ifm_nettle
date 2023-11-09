@@ -92,6 +92,11 @@ configure_file(
 )
 
 configure_file(
+	"${CMAKE_CURRENT_SOURCE_DIR}/ifm_libverto.pc.in"
+	"${CMAKE_BINARY_DIR}/conf/ifm_libverto.pc"
+)
+
+configure_file(
   "${CMAKE_CURRENT_SOURCE_DIR}/ifm_libhv2ev.pc.in"
 	"${CMAKE_BINARY_DIR}/conf/ifm_libhv2ev.pc"
 )
@@ -138,6 +143,10 @@ install(FILES ${CMAKE_BINARY_DIR}/conf/ifm_libgcrypt.pc
 
 # install all files
 install(FILES ${CMAKE_BINARY_DIR}/conf/ifm_libxcrypt.pc
+	DESTINATION ${LIB_INSTALL_DIR_DEFAULT}/pkgconfig PERMISSIONS OWNER_READ OWNER_WRITE GROUP_READ GROUP_WRITE WORLD_READ WORLD_EXECUTE)
+
+# install all files
+install(FILES ${CMAKE_BINARY_DIR}/conf/ifm_libverto.pc
 	DESTINATION ${LIB_INSTALL_DIR_DEFAULT}/pkgconfig PERMISSIONS OWNER_READ OWNER_WRITE GROUP_READ GROUP_WRITE WORLD_READ WORLD_EXECUTE)
 
 # install all files

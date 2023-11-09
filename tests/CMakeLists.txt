@@ -105,7 +105,7 @@ target_link_libraries(mock_ut
     ${GTEST_LIBRARY}
     pthread
     )
-add_dependencies(mock_ut sm3_ut md5_ut sha224_ut sha256_ut sha384_ut sha512_ut sha512_224_ut sha512_256_ut gcrypt_md_ut gcrypt_pk_ut aes_ut aes_keywrap_ut cbc_ut gcm_ut rsa_ut gcrypt_basic_ut xcrypt_basic_ut hmac_ut gcrypt_basic_cipher_ut hv2ev_ut)
+add_dependencies(mock_ut sm3_ut md5_ut sha224_ut sha256_ut sha384_ut sha512_ut sha512_224_ut sha512_256_ut gcrypt_md_ut gcrypt_pk_ut aes_ut aes_keywrap_ut cbc_ut gcm_ut rsa_ut gcrypt_basic_ut xcrypt_basic_ut hmac_ut gcrypt_basic_cipher_ut hv2ev_ut verto_ut)
 
 # gcrypt benchmark
 add_executable(gcrypt_benchmark gcrypt_benchmark.cpp)

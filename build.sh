@@ -3,7 +3,7 @@
 rm -rf build/
 mkdir build
 cd build
-cmake ..
+cmake .. -DLIB_INSTALL_DIR=/usr/lib64
 if [ $? -ne 0 ];then
     echo "Failed: cmake failed, exit"
     exit 1
@@ -20,5 +20,9 @@ if [ $? -ne 0 ];then
     exit 1
 fi
 
-
 echo "SUCCESS: Build ifm_nettle successful."
+
+if [ x$1 == x"install" ]; then
+    make install
+    echo "SUCCESS: install ifm_nettle successful."
+fi
