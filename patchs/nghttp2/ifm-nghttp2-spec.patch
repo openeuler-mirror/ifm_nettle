@@ -1,0 +1,71 @@
+From 131270538b248687ff4f56e6d79553e15949d1fa Mon Sep 17 00:00:00 2001
+From: huangduirong <huangduirong@huawei.com>
+Date: Sun, 5 Nov 2023 13:53:51 +0800
+Subject: [PATCH] ifm nghttp2 spec
+
+---
+ nghttp2.spec | 24 +++++++++++++++++++++---
+ 1 file changed, 21 insertions(+), 3 deletions(-)
+
+diff --git a/nghttp2.spec b/nghttp2.spec
+index e077374..7e32d46 100644
+--- a/nghttp2.spec
++++ b/nghttp2.spec
+@@ -1,6 +1,7 @@
++
+ Name:           nghttp2
+ Version:        1.55.1
+-Release:        2
++Release:        3
+ Summary:        Contains the HTTP/2 client, server and proxy programs.
+ License:        MIT
+ URL:            https://nghttp2.org/
+@@ -8,10 +9,15 @@ Source0:        https://github.com/nghttp2/nghttp2/releases/download/v%{version}
+ 
+ Patch0:         backport-CVE-2023-44487.patch
+ Patch1:         backport-Fix-build-error-when-both-clock_gettime-and-GetTickCount64.patch
++Patch9001:         ifm-use-libverto-instead-of-libev.patch
++Patch9002:         update-build-file.patch
++
+ 
+ BuildRequires:  CUnit-devel c-ares-devel gcc-c++ libev-devel openssl-devel automake
+ BuildRequires:  python3-devel systemd-devel zlib-devel make libxml2-devel
+ 
++BuildRequires:  libverto-devel
++
+ Requires:       libnghttp2 = %{version}-%{release}
+ %{?systemd_requires}
+ 
+@@ -42,8 +48,14 @@ sed -e '1 s|^#!/.*python|&3|' -i script/fetch-ocsp-response
+ 
+ %build
+ autoreconf
+-%configure PYTHON=%{__python3} --disable-hpack-tools --disable-python-bindings\
+-    --with-libxml2 --disable-static
++automake
++%configure PYTHON=%{__python3} \
++    --disable-hpack-tools \
++    --disable-python-bindings \
++    --with-libxml2   \
++    --with-libverto \
++    --disable-static
++
+ %disable_rpath
+ %make_build  V=1
+ 
+@@ -92,6 +104,12 @@ export "LD_LIBRARY_PATH=$RPM_BUILD_ROOT%{_libdir}:$LD_LIBRARY_PATH"
+ %{_mandir}/man1/*
+ 
+ %changelog
++* Fri Oct 27 2023 dengjie <1171276417@qq.com> - 1.55.1-3 
++- Type:requirements
++- ID:NA
++- SUG:NA
++- DESC:add libverto support
++
+ * Thu Oct 19 2023 xingwei <xingwei14@h-partners.com> - 1.55.1-2
+ - Type:CVE
+ - ID:CVE-2023-44487
+-- 
+2.33.0
+

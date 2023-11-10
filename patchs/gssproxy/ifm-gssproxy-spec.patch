@@ -1,0 +1,43 @@
+From a9f2bbef6f156f3c68846aaec0f6702255d43f0a Mon Sep 17 00:00:00 2001
+From: huangduirong <huangduirong@huawei.com>
+Date: Sat, 4 Nov 2023 22:38:07 +0800
+Subject: [PATCH] ifm gssproxy spec
+
+---
+ gssproxy.spec | 6 ++++--
+ 1 file changed, 4 insertions(+), 2 deletions(-)
+
+diff --git a/gssproxy.spec b/gssproxy.spec
+index 53f1b7e..d9e8c9c 100644
+--- a/gssproxy.spec
++++ b/gssproxy.spec
+@@ -7,7 +7,7 @@
+ 
+ Name:		gssproxy
+ Version:	0.9.1
+-Release:	4
++Release:	5
+ Summary:	GSSAPI Proxy
+ License:	MIT
+ URL:		https://github.com/gssapi/gssproxy
+@@ -16,6 +16,7 @@ Source0:	https://github.com/gssapi/%{name}/releases/download/v%{version}/%{name}
+ Patch1:    backport-Typo-doc-fix.patch
+ Patch2:    backport-More-typo-fixes-to-silence-Debian-lintian-typo-in-ma.patch
+ Patch3:    backport-tests-fix-userproxytest-missed-NULL-argument-pointer.patch
++Patch9001:  ifm-use-ifm_libverto-instead-of-verto.patch
+ 
+ Requires: krb5 keyutils libverto-module-base libini_config
+ Requires(post): systemd
+@@ -55,7 +56,8 @@ autoreconf -f -i
+     --with-initscript=systemd \
+     --disable-static \
+     --disable-rpath \
+-    --with-gpp-default-behavior=REMOTE_FIRST
++    --with-gpp-default-behavior=REMOTE_FIRST \
++    --enable-ifm-libverto
+ 
+ make %{?_smp_mflags} all
+ make test_proxymech
+-- 
+2.33.0
+

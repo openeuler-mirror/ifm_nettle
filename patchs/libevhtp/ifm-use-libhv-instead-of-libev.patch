@@ -1,0 +1,136 @@
+From cb5545ad5603b09fee7d38b0050951ff17f24d21 Mon Sep 17 00:00:00 2001
+From: huangduirong <huangduirong@huawei.com>
+Date: Fri, 3 Nov 2023 08:22:26 +0800
+Subject: [PATCH] use libhv instead of libev
+
+---
+ CMakeLists.txt         | 18 ++++++++++++++----
+ cmake/options.cmake    |  3 +++
+ evhtp.c                |  2 ++
+ examples/test.c        |  2 ++
+ include/evhtp/evhtp.h  |  2 ++
+ include/evhtp/thread.h |  2 ++
+ thread.c               |  2 ++
+ 7 files changed, 27 insertions(+), 4 deletions(-)
+
+diff --git a/CMakeLists.txt b/CMakeLists.txt
+index d4596f6..01c5754 100644
+--- a/CMakeLists.txt
++++ b/CMakeLists.txt
+@@ -54,10 +54,20 @@ set(LIBEVHTP_SOURCE_FILES
+     parser.c
+     log.c)
+ 
+-find_package(LibEvent REQUIRED)
+-list(APPEND LIBEVHTP_EXTERNAL_LIBS ${LIBEVENT_LIBRARIES})
+-list(APPEND LIBEVHTP_EXTERNAL_INCLUDES ${LIBEVENT_INCLUDE_DIRS})
+-list(APPEND package_deps LibEvent)
++if(NOT EVHTP_DISABLE_SSL)
++    find_package(LibEvent REQUIRED)
++    list(APPEND LIBEVHTP_EXTERNAL_LIBS ${LIBEVENT_LIBRARIES})
++    list(APPEND LIBEVHTP_EXTERNAL_INCLUDES ${LIBEVENT_INCLUDE_DIRS})
++    list(APPEND package_deps LibEvent)
++else()
++    set(LIBHV2EV_INCLUDE_DIRS
++        /usr/local/include
++        /usr/local/include/hv)
++    set(LIBHV2EV_LIBRARIES
++        /usr/lib64/libifm_libhv2ev.so)
++    list(APPEND LIBEVHTP_EXTERNAL_INCLUDES ${LIBHV2EV_INCLUDE_DIRS})
++    list(APPEND LIBEVHTP_EXTERNAL_LIBS ${LIBHV2EV_LIBRARIES})
++endif()
+ 
+ set(evhtp_dir_headers
+   "include/evhtp/evhtp.h"
+diff --git a/cmake/options.cmake b/cmake/options.cmake
+index e781110..f7081a7 100644
+--- a/cmake/options.cmake
++++ b/cmake/options.cmake
+@@ -14,6 +14,9 @@ option (EVHTP_DEBUG         "Enable verbose debug logging"     OFF)
+ # -DEVHTP_BUILD_SHARED=ON
+ option (EVHTP_BUILD_SHARED  "Build shared libraries"       OFF)
+ 
++# -DEVHTP_USE_HV=ON
++option (EVHTP_USE_HV         "Use libhv instead of libev"     OFF)
++
+ # can be overwritten by new set_alloc functions
+ set(EVHTP_ALLOCATOR CACHE STRING "Allocator library")
+ set_property(CACHE EVHTP_ALLOCATOR PROPERTY STRINGS "jemalloc;tcmalloc")
+diff --git a/evhtp.c b/evhtp.c
+index 2ecb619..d4e4b1e 100644
+--- a/evhtp.c
++++ b/evhtp.c
+@@ -27,7 +27,9 @@
+ #endif
+ 
+ #include <limits.h>
++#ifndef EVHTP_USE_HV
+ #include <event2/dns.h>
++#endif
+ 
+ #include "evhtp/config.h"
+ #include "internal.h"
+diff --git a/examples/test.c b/examples/test.c
+index d705ff0..dc20b6b 100644
+--- a/examples/test.c
++++ b/examples/test.c
+@@ -6,7 +6,9 @@
+ #include <errno.h>
+ #include <signal.h>
+ #include <inttypes.h>
++#ifndef EVHTP_USE_HV
+ #include <event2/event.h>
++#endif
+ 
+ #include "internal.h"
+ #include "evhtp/evhtp.h"
+diff --git a/include/evhtp/evhtp.h b/include/evhtp/evhtp.h
+index fbe79ba..e3a1f38 100644
+--- a/include/evhtp/evhtp.h
++++ b/include/evhtp/evhtp.h
+@@ -19,10 +19,12 @@
+ #endif
+ 
+ #include <sys/queue.h>
++#ifndef EVHTP_USE_HV
+ #include <event2/event.h>
+ #include <event2/listener.h>
+ #include <event2/buffer.h>
+ #include <event2/bufferevent.h>
++#endif
+ 
+ #ifndef EVHTP_DISABLE_SSL
+ #include <event2/bufferevent_ssl.h>
+diff --git a/include/evhtp/thread.h b/include/evhtp/thread.h
+index 61058a1..3736bf0 100644
+--- a/include/evhtp/thread.h
++++ b/include/evhtp/thread.h
+@@ -6,8 +6,10 @@
+ #define __EVTHR_H__
+ 
+ #include <pthread.h>
++#ifndef EVHTP_USE_HV
+ #include <event2/event.h>
+ #include <evhtp/config.h>
++#endif
+ 
+ #ifdef __cplusplus
+ extern "C" {
+diff --git a/thread.c b/thread.c
+index 1570b69..945543f 100644
+--- a/thread.c
++++ b/thread.c
+@@ -12,8 +12,10 @@
+ #include <unistd.h>
+ #include <pthread.h>
+ 
++#ifndef EVHTP_USE_HV
+ #include <event2/event.h>
+ #include <event2/thread.h>
++#endif
+ 
+ #include "internal.h"
+ #include "evhtp/thread.h"
+-- 
+2.33.0
+
