@@ -437,6 +437,7 @@ int hv2ev_evbuffer_add_printf(struct evbuffer *buf, const char *fmt, ...)
     va_start(args, fmt);
     int n = vsprintf(str, fmt, args);
     if (n < 0) {
+        va_end(args);
         return n;
     }
     va_end(args);
