@@ -1,5 +1,5 @@
 /******************************************************************************
- * uadk_sha2_meta.h: meta for gcry_uadk_sha2
+ * gcrypt_sha2_meta.h: meta for gcry_uadk_sha2
  *
  * Copyright (c) Huawei Technologies Co., Ltd. 2020. All rights reserved.
  *
@@ -23,8 +23,8 @@
 #ifndef GCRY_UADK_SHA2_META_INCLUDED
 #define GCRY_UADK_SHA2_META_INCLUDED
 
-#include <../uadk_meta.h>
 #include <gcrypt.h>
+#include "uadk_meta.h"
 
 #ifdef __aarch64__
 #include "uadk/v1/wd.h"
@@ -42,13 +42,9 @@ extern "C" {
 #define SHA512_DIGEST_SIZE 64
 #define SHA384_DIGEST_SIZE 48
 #define MAX_HMAC_KEY_SIZE 128
-struct uadk_digest_struct {
-    struct wd_queue *pq;
-    struct wcrypto_digest_ctx_setup setup;
-    struct wcrypto_digest_op_data opdata;
-    void *pool;
-    void *ctx;
-    int alg;
+struct gcrypt_digest_struct {
+    struct uadk_digest_st uadk_ctx;
+    enum gcry_md_algos alg;
 };
 #endif
 
@@ -57,7 +53,7 @@ typedef struct gcry_uadk_sha2_hd {
 
 #ifdef __aarch64__
     int ctx_len;
-    struct uadk_digest_struct uadk_ctx[4]; /* UADK相关的结构体数据 */
+    struct gcrypt_digest_struct alg_ctx[4];    /* gcrypt中每种alg的ctx对象，因为gcrypt中可能存在同时配置多种算法的场景 */
     bool use_uadk;
     bool use_gcry;
     void *key;

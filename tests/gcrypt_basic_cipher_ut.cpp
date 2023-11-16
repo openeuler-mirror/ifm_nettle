@@ -27,6 +27,11 @@
 #include <stddef.h>
 #include <gpg-error.h>
 #include "ifm_gcrypt.h"
+#include "ifm_utils.h"
+#define gcry_md_handle gcry_uadk_sha2_hd
+#define gcry_md_hd_t gcry_uadk_sha2_hd_t
+#define gcry_cipher_handle gcry_uadk_aes_hd
+#define gcry_cipher_hd_t gcry_uadk_aes_hd_t
 
 #define PGM "basic"
 #include "gcrypt_ut_common.h"
@@ -45,6 +50,42 @@
 static int in_fips_mode;
 
 #define MAX_DATA_LEN 1040
+
+// check if realy use uadk, if should use uadk, but do not use, assert fail
+static void check_use_uadk(gcry_cipher_hd_t hd, int algo, int mode, int inlen, int ivlen, int keylen)
+{
+#ifdef __aarch64__
+    if (UadkEnabled() == false) {
+        ASSERT(hd->use_uadk == false);
+        return;
+    }
+    if (algo != GCRY_CIPHER_AES && algo != GCRY_CIPHER_AES192 && algo != GCRY_CIPHER_AES256) {
+        ASSERT(hd->use_uadk == false);
+        return;
+    }
+    if (mode != GCRY_CIPHER_MODE_ECB && mode != GCRY_CIPHER_MODE_CBC &&
+        mode != GCRY_CIPHER_MODE_XTS && mode != GCRY_CIPHER_MODE_OFB) {
+        ASSERT(hd->use_uadk == false);
+        return;
+    }
+    if (algo == GCRY_CIPHER_AES192 && mode == GCRY_CIPHER_MODE_XTS) {
+        ASSERT(hd->use_uadk == false);
+        return;
+    }
+    if (ivlen != 0 && ivlen != CIPHER_IV_SIZE) {
+        ASSERT(hd->use_uadk == false);
+        return;
+    }
+    if (inlen >= MAX_CIPHER_LENGTH && inlen % AES_BLOCK_SIZE != 0) {
+        ASSERT(hd->use_uadk == false);
+        return;
+    }
+    IFM_ERR("alg [%s] mode [%s] inlen [%d] ivlen [%d] keylen [%d], should use uadk\n", \
+            algo, mode, inlen, ivlen, keylen);
+    ASSERT(hd->use_uadk == true);
+#endif
+    return;
+}
 
 static void
 mismatch (const void *expected, size_t expectedlen,
@@ -813,6 +854,7 @@ check_one_cipher_core (int algo, int mode, int flags,
         fail ("pass %d, algo %d, mode %d, in-place split-buffer, encrypt-decrypt"
               " mismatch\n", pass, algo, mode);
 
+    check_use_uadk(hd, algo, mode, nplain, 0, keylen);
 
     gcry_cipher_close (hd);
 
@@ -2467,6 +2509,7 @@ check_cipher_modes(void)
 }
 
 TEST(gcrypt_basic_cipher_ut, gcrypt_basic_cipher_testcases){
+    verbose = 1;
     check_ciphers();
     check_cipher_modes ();
     check_bulk_cipher_modes ();

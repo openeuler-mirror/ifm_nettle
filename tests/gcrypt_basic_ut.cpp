@@ -23,6 +23,8 @@
 #include <stddef.h>
 #include <gpg-error.h>
 #include "ifm_gcrypt.h"
+#define gcry_md_handle gcry_uadk_sha2_hd
+#define gcry_md_hd_t gcry_uadk_sha2_hd_t
 
 #define PGM "basic"
 #include "gcrypt_ut_common.h"
@@ -594,7 +596,7 @@ static void
 check_one_md (int algo, const char *data, int len, const char *expect, int elen,
               const char *key, int klen)
 {
-    gcry_md_hd_t hd, hd2;
+    gcry_md_hd_t hd, hd2, hd3;
     unsigned char *p;
     int mdlen;
     int i, j;
@@ -607,6 +609,15 @@ check_one_md (int algo, const char *data, int len, const char *expect, int elen,
         fail("algo %d, gcry_md_open failed: %s\n", algo, gpg_strerror(err));
         return;
     }
+    err = gcry_md_open(&hd3, algo, 0);
+    if (err)
+    {
+        fail("algo %d, gcry_md_open failed: %s\n", algo, gpg_strerror(err));
+        return;
+    }
+    #ifdef __aarch64__
+    hd3->use_uadk = false;
+    #endif
 
     mdlen = gcry_md_get_algo_dlen(algo);
     if (mdlen < 1 || mdlen > 500)
@@ -618,6 +629,7 @@ check_one_md (int algo, const char *data, int len, const char *expect, int elen,
         else
         {
             gcry_md_close(hd);
+            gcry_md_close(hd3);
             fail("algo %d, gcry_md_get_algo_dlen failed: %d\n", algo, mdlen);
             return;
         }
@@ -633,11 +645,18 @@ check_one_md (int algo, const char *data, int len, const char *expect, int elen,
             fail("algo %d, gcry_md_setkey failed: %s\n", algo, gpg_strerror(err));
             return;
         }
+        err = gcry_md_setkey(hd3, key, klen);
+        if (err)
+        {
+            gcry_md_close(hd3);
+            fail("algo %d, gcry_md_setkey failed: %s\n", algo, gpg_strerror(err));
+            return;
+        }
     }
 
     if (*data == '!' && !data[1] && !xof)
     {
-        unsigned char *p1, *p2;
+        unsigned char *p1, *p2, *p3;
         char buf[129];
 
         /* Test hashing small input sizes first as full block, then byte-by-byte
@@ -659,6 +678,7 @@ check_one_md (int algo, const char *data, int len, const char *expect, int elen,
             {
                 gcry_md_close(hd);
                 gcry_md_close(hd2);
+                gcry_md_close(hd3);
                 fail("algo %d, gcry_md_setkey failed: %s\n", algo, gpg_strerror(err));
                 return;
             }
@@ -671,9 +691,13 @@ check_one_md (int algo, const char *data, int len, const char *expect, int elen,
         {
             gcry_md_reset(hd);
             gcry_md_reset(hd2);
+            gcry_md_reset(hd3);
 
             clutter_vector_registers();
             gcry_md_write(hd, buf, i);
+            p1 = gcry_md_read(hd, algo);
+            gcry_md_write(hd3, buf, i);
+            p3 = gcry_md_read(hd3, algo);
 
             // if (i % 64 != 0)
             // {
@@ -692,11 +716,13 @@ check_one_md (int algo, const char *data, int len, const char *expect, int elen,
                     block_len = i - j;
                 gcry_md_write(hd2, buf + j, block_len);
             }
-            // gcry_md_write(hd2, buf, i);
-
+            //gcry_md_write(hd2, buf, i);
             clutter_vector_registers();
-            p1 = gcry_md_read(hd, algo);
             p2 = gcry_md_read(hd2, algo);
+            #ifdef __aarch64__
+            printf("memcmp(len: %d), hd uadk: %d, hd2 uadk: %d, hd3 uadk: %d\n", \
+                    i, hd->use_uadk, hd2->use_uadk, hd3->use_uadk);
+            #endif
             if (memcmp(p1, p2, mdlen))
             {
                 printf("input info(len: %d): ", block_len);
@@ -713,13 +739,31 @@ check_one_md (int algo, const char *data, int len, const char *expect, int elen,
 
                 fail("algo %d, digest mismatch\n", algo);
             }
+            if (memcmp(p1, p3, mdlen))
+            {
+                printf("input info(len: %d): ", block_len);
+                for (j = 0; j < i; j++)
+                    printf("%02x ", buf[j] & 0xFF);
+                printf("\n");
+                printf("uadk value (input length %d): ", i);
+                for (int k = 0; k < mdlen; k++)
+                    printf("%02x ", p1[k] & 0xFF);
+                printf("\n gcrypt value: ");
+                for (int k = 0; k < mdlen; k++)
+                    printf("%02x ", p3[k] & 0xFF);
+                printf("\n");
+
+                fail("algo %d, digest mismatch with gcrypt\n", algo);
+            }
         }
 
         gcry_md_close(hd2);
         gcry_md_reset(hd);
+        gcry_md_reset(hd3);
     }
 
     gcry_md_close(hd);
+    gcry_md_close(hd3);
 }
 
 static void

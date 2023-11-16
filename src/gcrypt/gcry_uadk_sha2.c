@@ -38,8 +38,12 @@
  *  HMAC模式下setkey这类密钥会得到错误的digest，相关测试用例已注释（gcrypt_basic_ut中check_hmac用例10、11、12、16、17、18）
  *
  *  3. SHA384和SHA512运算进行hash得到的digest结果不正确，目前原因未知，所以入口限制算法为SHA224和SHA256
+ *  4. 系统中存在一个问题，当上层调用者申请同时并行进行两个数据进行hash时，可能会导致线程不安全，因为wcrypto_do_digest是线程不安全的。
  *  Author:
  *  xinghailiao <xinghailiao@smail.xtu.edu.cn>
+ * 
+ *  约束：
+ *  1. 支持进行分包场景进行hash，但是每次分包必须64字节对齐，最后一段数据可以不需要64字节对齐。
  */
 
 #ifdef __aarch64__
@@ -49,68 +53,43 @@
  * @param algo 待添加的算法
  * @return
  */
-gcry_error_t uadk_md_enable(gcry_uadk_sha2_hd_t hd, int algo) {
-    gcry_error_t ret = 0;
-    static struct wd_queue q;
-    static struct wd_blkpool_setup pool_setup;
-    static void *pool = NULL;
-    static bool init = false;
-    if (!init) {
-        memset(&q, 0, sizeof(q));
-        q.capa.alg = "digest";
-        ret = wd_request_queue(&q);
-        if (ret) {
-            return ret;
-        }
-        memset(&pool_setup, 0, sizeof(pool_setup));
-        pool_setup.block_size = MAX_BLOCK_SZ;
-        pool_setup.block_num = MAX_BLOCK_NM;
-        pool_setup.align_size = SQE_SIZE;
-        pool = wd_blkpool_create(&q, &pool_setup);
-        init = true;
-    }
+gcry_error_t uadk_md_enable(gcry_uadk_sha2_hd_t hd, enum gcry_md_algos algo) {
+    IFMUadkShareCtx *p_share_ctx = NULL;
+    enum wcrypto_digest_alg uadk_alg;
     for (int i = 0; i < hd->ctx_len; i++) {
-        if (algo == hd->uadk_ctx[i].alg) {
+        if (algo == hd->alg_ctx[i].alg) {
             return 0;
         }
     }
-
-    hd->uadk_ctx[hd->ctx_len].pool = pool;
-    hd->uadk_ctx[hd->ctx_len].alg = algo;
-    memset(&(hd->uadk_ctx[hd->ctx_len].opdata), 0, sizeof(struct wcrypto_digest_op_data));
-    memset(&(hd->uadk_ctx[hd->ctx_len].setup), 0, sizeof(struct wcrypto_digest_ctx_setup));
     switch (algo) {
         case GCRY_MD_SHA224:
-            hd->uadk_ctx[hd->ctx_len].setup.alg = WCRYPTO_SHA224;
-            hd->uadk_ctx[hd->ctx_len].opdata.out_bytes = SHA224_DIGEST_SIZE;
+            uadk_alg = WCRYPTO_SHA224;
             break;
         case GCRY_MD_SHA256:
-            hd->uadk_ctx[hd->ctx_len].setup.alg = WCRYPTO_SHA256;
-            hd->uadk_ctx[hd->ctx_len].opdata.out_bytes = SHA256_DIGEST_SIZE;
+            uadk_alg = WCRYPTO_SHA256;
             break;
         case GCRY_MD_SHA384:
-            hd->uadk_ctx[hd->ctx_len].setup.alg = WCRYPTO_SHA384;
-            hd->uadk_ctx[hd->ctx_len].opdata.out_bytes = SHA384_DIGEST_SIZE;
+            uadk_alg = WCRYPTO_SHA384;
             break;
         case GCRY_MD_SHA512:
-            hd->uadk_ctx[hd->ctx_len].setup.alg = WCRYPTO_SHA512;
-            hd->uadk_ctx[hd->ctx_len].opdata.out_bytes = SHA512_DIGEST_SIZE;
+            uadk_alg = WCRYPTO_SHA512;
             break;
+        default:
+            IFM_ERR("uadk_md_enable algo is invalid\n");
+            return -1;
     }
-    hd->uadk_ctx[hd->ctx_len].setup.mode = hd->mode;
-    hd->uadk_ctx[hd->ctx_len].setup.br.alloc = (void *)wd_alloc_blk;
-    hd->uadk_ctx[hd->ctx_len].setup.br.free = (void *)wd_free_blk;
-    hd->uadk_ctx[hd->ctx_len].setup.br.iova_map = (void *)wd_blk_iova_map;
-    hd->uadk_ctx[hd->ctx_len].setup.br.iova_unmap = (void *)wd_blk_iova_unmap;
-    hd->uadk_ctx[hd->ctx_len].setup.br.get_bufsize = (void *)wd_blksize;
-    hd->uadk_ctx[hd->ctx_len].setup.br.usr = pool;
-    hd->uadk_ctx[hd->ctx_len].pq = &q;
-    hd->uadk_ctx[hd->ctx_len].ctx = wcrypto_create_digest_ctx(hd->uadk_ctx[hd->ctx_len].pq, &(hd->uadk_ctx[hd->ctx_len].setup));
-    if (NULL == hd->uadk_ctx[hd->ctx_len].ctx) {
-        ret = 1;
+
+    memset(&(hd->alg_ctx[hd->ctx_len].uadk_ctx), 0, sizeof(struct uadk_digest_st));
+    p_share_ctx = get_uadk_ctx(IFM_UADK_ALG_DIGEST, uadk_alg, hd->mode, true);
+    if (p_share_ctx == NULL) {
+        IFM_ERR("uadk_ctx_init get_uadk_ctx failed\n");
+        return -1;
     }
+    hd->alg_ctx[hd->ctx_len].uadk_ctx.ctx = p_share_ctx->ctx;
+    hd->alg_ctx[hd->ctx_len].alg = algo;
     hd->ctx_len += 1;
-    return ret;
+
+    return 0;
 }
 
 /**
@@ -121,21 +100,15 @@ gcry_error_t uadk_md_enable(gcry_uadk_sha2_hd_t hd, int algo) {
  * @return
  */
 gcry_error_t uadk_md_open(gcry_uadk_sha2_hd_t *hd, int algo, unsigned int flags) {
-    gcry_uadk_sha2_hd_t h = malloc(sizeof(struct gcry_uadk_sha2_hd));
-    if (NULL == h) {
-        return 1;
-    }
-    h->gcry_hd_t = NULL;
-    h->key = NULL;
-    h->keylen = 0;
-    h->ctx_len = 0;
-    h->use_gcry = false;
+    (*hd)->key = NULL;
+    (*hd)->keylen = 0;
+    (*hd)->ctx_len = 0;
+    (*hd)->use_gcry = false;
     if (flags == GCRY_MD_FLAG_HMAC) {
-        h->mode = WCRYPTO_DIGEST_HMAC;
+        (*hd)->mode = WCRYPTO_DIGEST_HMAC;
     } else {
-        h->mode = WCRYPTO_DIGEST_NORMAL;
+        (*hd)->mode = WCRYPTO_DIGEST_NORMAL;
     }
-    (*hd) = h;
     return uadk_md_enable(*hd, algo);
 }
 
@@ -145,24 +118,39 @@ gcry_error_t uadk_md_open(gcry_uadk_sha2_hd_t *hd, int algo, unsigned int flags)
  */
 void uadk_md_close(gcry_uadk_sha2_hd_t hd) {
     for (int i = 0; i < hd->ctx_len; i++) {
-        if (hd->uadk_ctx[i].opdata.in) {
-            wd_free_blk(hd->uadk_ctx[i].pool, hd->uadk_ctx[i].opdata.in);
-            hd->uadk_ctx[i].opdata.in = NULL;
-        }
-        if (hd->uadk_ctx[i].opdata.out) {
-            wd_free_blk(hd->uadk_ctx[i].pool, hd->uadk_ctx[i].opdata.out);
-            hd->uadk_ctx[i].opdata.out = NULL;
-        }
-        if (hd->uadk_ctx[i].ctx) {
-            wcrypto_del_digest_ctx(hd->uadk_ctx[i].ctx);
-            hd->uadk_ctx[i].ctx = NULL;
-        }
+        free_uadk_opdata(IFM_UADK_ALG_DIGEST, hd->alg_ctx[i].uadk_ctx.p_share_opdata);
+        hd->alg_ctx[i].uadk_ctx.p_share_opdata = NULL;
+        // 由于digest中的ctx是全局共享，因此无需释放ctx，get_ctx的时候，使用的share参数是true
     }
     hd->ctx_len = 0;
-    if(hd->key)
-    {
+    if (hd->key) {
         free(hd->key);
     }
+}
+
+int get_size_by_alg(enum gcry_md_algos alg) {
+    __u32 out_bytes_size = 0;
+    switch (alg) {
+        case GCRY_MD_SHA224:
+            out_bytes_size = SHA224_DIGEST_SIZE;
+            break;
+        case GCRY_MD_SHA256:
+            out_bytes_size = SHA256_DIGEST_SIZE;
+            break;
+        case GCRY_MD_SHA384:
+            out_bytes_size = SHA384_DIGEST_SIZE;
+            break;
+        case GCRY_MD_SHA512:
+            out_bytes_size = SHA512_DIGEST_SIZE;
+            break;
+        default:
+            out_bytes_size = 0;
+            IFM_ERR("[%s] alg %d is not support, please check the alg is correct or not\n", \
+                    __func__, alg);
+            break;
+    }
+
+    return out_bytes_size;
 }
 
 /**
@@ -178,51 +166,43 @@ void uadk_md_write(gcry_uadk_sha2_hd_t hd, const void *data, size_t length) {
     const void *data_pt = NULL;
     unsigned int total_len = 0;
     for (int i = 0; i < hd->ctx_len; i++) {
-        if (!hd->uadk_ctx[i].opdata.in) {
-            hd->uadk_ctx[i].opdata.in = wd_alloc_blk(hd->uadk_ctx[i].pool);
-            if (NULL == hd->uadk_ctx[i].opdata.in) {
+        if (!hd->alg_ctx[i].uadk_ctx.p_share_opdata) {
+            hd->alg_ctx[i].uadk_ctx.p_share_opdata = get_uadk_opdata(IFM_UADK_ALG_DIGEST);
+            if (!hd->alg_ctx[i].uadk_ctx.p_share_opdata) {
+                IFM_ERR("uadk_md_write: get_uadk_opdata failed\n");
                 return;
             }
-        }
-        if (!hd->uadk_ctx[i].opdata.out) {
-            hd->uadk_ctx[i].opdata.out = wd_alloc_blk(hd->uadk_ctx[i].pool);
-            if (NULL == hd->uadk_ctx[i].opdata.out) {
-                return;
-            }
-            switch (hd->uadk_ctx[i].alg) {
-                case GCRY_MD_SHA224:
-                    hd->uadk_ctx[i].opdata.out_bytes = SHA224_DIGEST_SIZE;
-                    break;
-                case GCRY_MD_SHA256:
-                    hd->uadk_ctx[i].opdata.out_bytes = SHA256_DIGEST_SIZE;
-                    break;
-                case GCRY_MD_SHA384:
-                    hd->uadk_ctx[i].opdata.out_bytes = SHA384_DIGEST_SIZE;
-                    break;
-                case GCRY_MD_SHA512:
-                    hd->uadk_ctx[i].opdata.out_bytes = SHA512_DIGEST_SIZE;
-                    break;
-            }
+            hd->alg_ctx[i].uadk_ctx.p_opdata =
+                (struct wcrypto_digest_op_data *)(hd->alg_ctx[i].uadk_ctx.p_share_opdata->opdata);
+            hd->alg_ctx[i].uadk_ctx.p_opdata->out_bytes = get_size_by_alg(hd->alg_ctx[i].alg);
         }
         do {
             data_pt = data + total_len;
             if (total_len + MAX_BLOCK_SZ <= length) {
-                memcpy(hd->uadk_ctx[i].opdata.in, data_pt, MAX_BLOCK_SZ);
-                hd->uadk_ctx[i].opdata.in_bytes = MAX_BLOCK_SZ;
-                hd->uadk_ctx[i].opdata.has_next = true;
+                memcpy(hd->alg_ctx[i].uadk_ctx.p_opdata->in, data_pt, MAX_BLOCK_SZ);
+                hd->alg_ctx[i].uadk_ctx.p_opdata->in_bytes = MAX_BLOCK_SZ;
+                hd->alg_ctx[i].uadk_ctx.p_opdata->has_next = true;
                 total_len += MAX_BLOCK_SZ;
             } else {
-                memcpy(hd->uadk_ctx[i].opdata.in, data_pt, length - total_len);
-                hd->uadk_ctx[i].opdata.in_bytes = length - total_len;
-                if (hd->uadk_ctx[i].opdata.in_bytes % 64) {
-                    hd->uadk_ctx[i].opdata.has_next = false;
+                // 该字段为true，表示上次最后一个opdata数据还未处理，先处理历史数据，再处理新数据
+                if (hd->alg_ctx[i].uadk_ctx.last_data_todo) {
+                    hd->alg_ctx[i].uadk_ctx.last_data_todo = false;
+                    hd->alg_ctx[i].uadk_ctx.p_opdata->has_next = true;
+                    wcrypto_do_digest(hd->alg_ctx[i].uadk_ctx.ctx, hd->alg_ctx[i].uadk_ctx.p_opdata, NULL);
+                }
+                memcpy(hd->alg_ctx[i].uadk_ctx.p_opdata->in, data_pt, length - total_len);
+                hd->alg_ctx[i].uadk_ctx.p_opdata->in_bytes = length - total_len;
+                // 非64字节的，一定是最后一段，但是对于64字节对齐的，无法判断是否最后一段，一次遗留在read时候处理。
+                if (hd->alg_ctx[i].uadk_ctx.p_opdata->in_bytes % 64) {
+                    hd->alg_ctx[i].uadk_ctx.p_opdata->has_next = false;
                 } else {
-                    hd->uadk_ctx[i].opdata.has_next = true;
+                    hd->alg_ctx[i].uadk_ctx.last_data_todo = true;
                 }
                 total_len = length;
             }
-            if (hd->uadk_ctx[i].opdata.in_bytes > 0) {
-                wcrypto_do_digest(hd->uadk_ctx[i].ctx, &(hd->uadk_ctx[i].opdata), NULL);
+            if (!hd->alg_ctx[i].uadk_ctx.last_data_todo && \
+                hd->alg_ctx[i].uadk_ctx.p_opdata->in_bytes > 0) {
+                wcrypto_do_digest(hd->alg_ctx[i].uadk_ctx.ctx, hd->alg_ctx[i].uadk_ctx.p_opdata, NULL);
             }
         } while (total_len < length);
         data_pt = NULL;
@@ -232,17 +212,26 @@ void uadk_md_write(gcry_uadk_sha2_hd_t hd, const void *data, size_t length) {
 
 /**
  * 适配libgcrypt中的gcry_md_read函数，根据algo返回hash结果
+ * 由于再最后一段64字节对齐数据传入的时候，无法确定是否是最后一段，因此对于64字节对齐的最后一段输入，在read的时候再处理
  * @param hd
  * @param algo
  * @return
  */
 unsigned char *uadk_md_read(gcry_uadk_sha2_hd_t hd, int algo) {
     for (int i = 0; i < hd->ctx_len; i++) {
-        if (hd->uadk_ctx[i].alg == algo) {
-            return hd->uadk_ctx[i].opdata.out;
+        if (hd->alg_ctx[i].alg == algo) {
+            if (hd->use_uadk && \
+                hd->alg_ctx[i].uadk_ctx.last_data_todo && \
+                hd->alg_ctx[i].uadk_ctx.p_opdata->in_bytes > 0) {
+                // 该字段为true，表示上次最后一个opdata数据还未处理，先处理历史数据，然后再返回结果
+                hd->alg_ctx[i].uadk_ctx.last_data_todo = false;
+                hd->alg_ctx[i].uadk_ctx.p_opdata->has_next = false;
+                wcrypto_do_digest(hd->alg_ctx[i].uadk_ctx.ctx, hd->alg_ctx[i].uadk_ctx.p_opdata, NULL);
+            }
+            return hd->alg_ctx[i].uadk_ctx.p_opdata->out;
         }
     }
-    return gcry_md_read((gcry_md_hd_t)hd, algo);
+    return gcry_md_read(hd->gcry_hd_t, algo);
 }
 
 /**
@@ -257,14 +246,16 @@ gcry_error_t uadk_md_setkey(gcry_uadk_sha2_hd_t hd, const void *key, size_t keyl
     if (!hd->key) {
         hd->key = malloc(sizeof(u_int8_t)*(MAX_HMAC_KEY_SIZE));
         if (NULL == hd->key) {
+            IFM_ERR("uadk_md_setkey: malloc failed\n");
             return 1;
         }
     }
     hd->keylen = keylen;
     memcpy(hd->key, key, hd->keylen);
     for (int i = 0; i < hd->ctx_len; i++) {
-        ret = wcrypto_set_digest_key(hd->uadk_ctx[i].ctx, hd->key, keylen);
+        ret = wcrypto_set_digest_key(hd->alg_ctx[i].uadk_ctx.ctx, hd->key, keylen);
         if (ret) {
+            IFM_ERR("uadk_md_setkey: wcrypto_set_digest_key failed, ret: %d\n", ret);
             return ret;
         }
     }
@@ -291,32 +282,36 @@ gcry_error_t uadk_md_copy(gcry_uadk_sha2_hd_t *dst, gcry_uadk_sha2_hd_t src) {
     (*dst)->use_gcry = src->use_gcry;
     if (src->use_uadk) {
         for (int i = 0; i < src->ctx_len; i++) {
-            ret = uadk_md_enable((*dst), src->uadk_ctx[i].alg);
+            ret = uadk_md_enable((*dst), src->alg_ctx[i].alg);
             if (0 != ret) {
                 return ret;
             }
-            if (src->uadk_ctx[i].opdata.in) {
-                if (!(*dst)->uadk_ctx[i].opdata.in) {
-                    (*dst)->uadk_ctx[i].opdata.in = wd_alloc_blk((*dst)->uadk_ctx[i].pool);
-                    if (!(*dst)->uadk_ctx[i].opdata.in) {
-                        return 1;
-                    }
+            if (!(*dst)->alg_ctx[i].uadk_ctx.p_share_opdata) {
+                (*dst)->alg_ctx[i].uadk_ctx.p_share_opdata = get_uadk_opdata(IFM_UADK_ALG_DIGEST);
+                if (!(*dst)->alg_ctx[i].uadk_ctx.p_share_opdata) {
+                    IFM_ERR("uadk_ctx_update: get_uadk_opdata failed\n");
+                    return -1;
                 }
-                (*dst)->uadk_ctx[i].opdata.in_bytes = src->uadk_ctx[i].opdata.in_bytes;
-                memcpy((*dst)->uadk_ctx[i].opdata.in, src->uadk_ctx[i].opdata.in, src->uadk_ctx[i].opdata.in_bytes);
+                (*dst)->alg_ctx[i].uadk_ctx.p_opdata = \
+                    (struct wcrypto_digest_op_data *)((*dst)->alg_ctx[i].uadk_ctx.p_share_opdata->opdata);
+                (*dst)->alg_ctx[i].uadk_ctx.p_opdata->out_bytes = get_size_by_alg((*dst)->alg_ctx[i].alg);
             }
-            (*dst)->uadk_ctx[i].opdata.has_next = src->uadk_ctx[i].opdata.has_next;
-            if (src->uadk_ctx[i].opdata.out) {
-                if (!(*dst)->uadk_ctx[i].opdata.out) {
-                    (*dst)->uadk_ctx[i].opdata.out = wd_alloc_blk((*dst)->uadk_ctx[i].pool);
-                    if (!(*dst)->uadk_ctx[i].opdata.out) {
-                        return 1;
-                    }
-                }
-                memcpy((*dst)->uadk_ctx[i].opdata.out, src->uadk_ctx[i].opdata.out, src->uadk_ctx[i].opdata.out_bytes);
+
+            if (src->alg_ctx[i].uadk_ctx.p_opdata->in) {
+                (*dst)->alg_ctx[i].uadk_ctx.p_opdata->in_bytes = src->alg_ctx[i].uadk_ctx.p_opdata->in_bytes;
+                memcpy((*dst)->alg_ctx[i].uadk_ctx.p_opdata->in, \
+                       src->alg_ctx[i].uadk_ctx.p_opdata->in, \
+                       src->alg_ctx[i].uadk_ctx.p_opdata->in_bytes);
             }
+            (*dst)->alg_ctx[i].uadk_ctx.p_opdata->has_next = src->alg_ctx[i].uadk_ctx.p_opdata->has_next;
+            if (src->alg_ctx[i].uadk_ctx.p_opdata->out) {
+                memcpy((*dst)->alg_ctx[i].uadk_ctx.p_opdata->out, \
+                       src->alg_ctx[i].uadk_ctx.p_opdata->out, \
+                       src->alg_ctx[i].uadk_ctx.p_opdata->out_bytes);
+            }
+            (*dst)->alg_ctx[i].uadk_ctx.last_data_todo = src->alg_ctx[i].uadk_ctx.last_data_todo;
             if ((*dst)->mode == WCRYPTO_DIGEST_HMAC && (*dst)->key && (*dst)->keylen) {
-                ret =  wcrypto_set_digest_key((*dst)->uadk_ctx[i].ctx, (*dst)->key, (*dst)->keylen);
+                ret =  wcrypto_set_digest_key((*dst)->alg_ctx[i].uadk_ctx.ctx, (*dst)->key, (*dst)->keylen);
                 if (ret) {
                     return ret;
                 }
@@ -332,15 +327,9 @@ gcry_error_t uadk_md_copy(gcry_uadk_sha2_hd_t *dst, gcry_uadk_sha2_hd_t src) {
  */
 void uadk_md_reset(gcry_uadk_sha2_hd_t hd) {
     for (int i = 0; i < hd->ctx_len; i++) {
-        if (hd->uadk_ctx[i].opdata.in) {
-            wd_free_blk(hd->uadk_ctx[i].pool, hd->uadk_ctx[i].opdata.in);
-            hd->uadk_ctx[i].opdata.in = NULL;
-        }
-        if (hd->uadk_ctx[i].opdata.out) {
-            wd_free_blk(hd->uadk_ctx[i].pool, hd->uadk_ctx[i].opdata.out);
-            hd->uadk_ctx[i].opdata.out = NULL;
-        }
-        memset(&(hd->uadk_ctx[i].opdata), 0, sizeof(struct wcrypto_digest_op_data));
+        free_uadk_opdata(IFM_UADK_ALG_DIGEST, hd->alg_ctx[i].uadk_ctx.p_share_opdata);
+        hd->alg_ctx[i].uadk_ctx.p_share_opdata = NULL;
+        hd->alg_ctx[i].uadk_ctx.last_data_todo = false;
     }
 }
 #endif
@@ -349,45 +338,57 @@ void uadk_md_reset(gcry_uadk_sha2_hd_t hd) {
 gcry_error_t gcry_uadk_md_open(gcry_uadk_sha2_hd_t *hd, int algo, unsigned int flags) {
 #ifdef __aarch64__
     gcry_error_t ret = 0;
-    if (algo != GCRY_MD_SHA224 && algo != GCRY_MD_SHA256) {
-        ret = 1;
-    } else {
-        ret = uadk_md_open(hd, algo, flags);
+    gcry_uadk_sha2_hd_t h = malloc(sizeof(struct gcry_uadk_sha2_hd));
+    if (NULL == h) {
+        return 1;
     }
-    if (UadkEnabled() == false || 0 != ret) {
-        ret = gcry_md_open((gcry_md_hd_t *)hd, algo, flags);
+    memset(h, 0, sizeof(struct gcry_uadk_sha2_hd));
+    *hd = h;
+
+    ret = gcry_md_open(&((*hd)->gcry_hd_t), algo, flags);
+    if (ret) {
+        IFM_ERR("[%s] gcry_md_open failed, ret %d\n", \
+                __func__, ret);
+        return ret;
+    }
+    if (UadkEnabled() == false || (algo != GCRY_MD_SHA224 && algo != GCRY_MD_SHA256)) {
+        (*hd)->use_uadk = false;
+        return ret;
+    }
+    ret = uadk_md_open(hd, algo, flags);
+    if (0 != ret) {
+        IFM_ERR("[%s] uadk_md_open failed, set uadk false\n", __func__);
         (*hd)->use_uadk = false;
     } else {
         (*hd)->use_uadk = true;
     }
-    return ret;
+    return 0;
 #else
-    return gcry_md_open((gcry_md_hd_t *)hd, algo, flags);
+    gcry_uadk_sha2_hd_t h = malloc(sizeof(struct gcry_uadk_sha2_hd));
+    if (NULL == h) {
+        return 1;
+    }
+    memset(h, 0, sizeof(struct gcry_uadk_sha2_hd));
+    *hd = h;
+    return gcry_md_open(&((*hd)->gcry_hd_t), algo, flags);
 #endif
 }
 
 gcry_error_t gcry_uadk_md_enable(gcry_uadk_sha2_hd_t hd, int algo) {
 #ifdef __aarch64__
     if (hd->use_uadk) {
-        gcry_error_t ret = 0;
         if (algo != GCRY_MD_SHA224 && algo != GCRY_MD_SHA256) {
             if (false == hd->use_gcry) {
-                unsigned int flags = hd->mode == WCRYPTO_DIGEST_HMAC?GCRY_MD_FLAG_HMAC:0;
-                ret = gcry_md_open(&(hd->gcry_hd_t), 0, flags);
-                if (ret == 0) {
-                    hd->use_gcry = true;
-                } else {
-                    return ret;
-                }
+                hd->use_gcry = true;
             }
-            return gcry_md_enable((gcry_md_hd_t)hd, algo);
+            return gcry_md_enable(hd->gcry_hd_t, algo);
         }
         return uadk_md_enable(hd, algo);
     } else {
-        return gcry_md_enable((gcry_md_hd_t)hd, algo);
+        return gcry_md_enable(hd->gcry_hd_t, algo);
     }
 #else
-    return gcry_md_enable((gcry_md_hd_t)hd, algo);
+    return gcry_md_enable(hd->gcry_hd_t, algo);
 #endif
 }
 
@@ -396,7 +397,8 @@ gcry_error_t gcry_uadk_md_setkey(gcry_uadk_sha2_hd_t hd, const void *key, size_t
 #ifdef __aarch64__
     if (hd->use_uadk) {
         gcry_error_t ret = 0;
-        if (keylen > MAX_HMAC_KEY_SIZE || NULL == key || 0 >= keylen) { //uadk对于长度限制为MAX_HMAC_KEY_SIZE，libgcrypt设置key长度可以大于这个值
+        // uadk对于长度限制为MAX_HMAC_KEY_SIZE，libgcrypt设置key长度可以大于这个值
+        if (keylen > MAX_HMAC_KEY_SIZE || NULL == key || 0 >= keylen) {
             ret =  1;
         } else {
             ret = uadk_md_setkey(hd, key, keylen);
@@ -404,29 +406,24 @@ gcry_error_t gcry_uadk_md_setkey(gcry_uadk_sha2_hd_t hd, const void *key, size_t
         if (ret) {
             hd->use_uadk = false;
             if (false == hd->use_gcry) {
-                unsigned int flags = hd->mode == WCRYPTO_DIGEST_HMAC? GCRY_MD_FLAG_HMAC:0;
-                ret = gcry_md_open(&(hd->gcry_hd_t), 0, flags);
-                if (ret) {
-                    return ret;
-                }
                 hd->use_gcry = true;
             }
             for (int j = 0; j < hd->ctx_len; j++) {
-                ret = gcry_md_enable((gcry_md_hd_t)hd, hd->uadk_ctx[j].alg);
+                ret = gcry_md_enable(hd->gcry_hd_t, hd->alg_ctx[j].alg);
                 if (ret) {
                     return ret;
                 }
             }
         }
         if (hd->use_gcry) {
-            ret = gcry_md_setkey((gcry_md_hd_t)hd, key, keylen);
+            ret = gcry_md_setkey(hd->gcry_hd_t, key, keylen);
         }
         return ret;
     } else {
-        return gcry_md_setkey((gcry_md_hd_t)hd, key, keylen);
+        return gcry_md_setkey(hd->gcry_hd_t, key, keylen);
     }
 #else
-    return gcry_md_setkey((gcry_md_hd_t)hd, key, keylen);
+    return gcry_md_setkey(hd->gcry_hd_t, key, keylen);
 #endif
 }
 
@@ -436,13 +433,13 @@ void gcry_uadk_md_write(gcry_uadk_sha2_hd_t hd, const void *buffer, size_t lengt
     if (hd->use_uadk) {
         uadk_md_write(hd, buffer, length);
         if (hd->use_gcry) {
-            gcry_md_write((gcry_md_hd_t)hd, buffer, length);
+            gcry_md_write(hd->gcry_hd_t, buffer, length);
         }
     } else {
-        gcry_md_write((gcry_md_hd_t)hd, buffer, length);
+        gcry_md_write(hd->gcry_hd_t, buffer, length);
     }
 #else
-    gcry_md_write((gcry_md_hd_t)hd, buffer, length);
+    gcry_md_write(hd->gcry_hd_t, buffer, length);
 #endif
 }
 
@@ -452,26 +449,31 @@ unsigned char *gcry_uadk_md_read(gcry_uadk_sha2_hd_t hd, int algo)
     if (hd->use_uadk) {
         return uadk_md_read(hd, algo);
     } else {
-        return gcry_md_read((gcry_md_hd_t)hd, algo);
+        return gcry_md_read(hd->gcry_hd_t, algo);
     }
 #else
-    return gcry_md_read((gcry_md_hd_t)hd, algo);
+    return gcry_md_read(hd->gcry_hd_t, algo);
 #endif
 }
 
 void gcry_uadk_md_close(gcry_uadk_sha2_hd_t hd)
 {
 #ifdef __aarch64__
-    if (hd->use_uadk) {
-        if (hd->use_gcry) {
-            gcry_md_close((gcry_md_hd_t)hd);
-        }
-        uadk_md_close(hd);
-    } else {
-        gcry_md_close((gcry_md_hd_t)hd);
+    if (NULL == hd) {
+        return;
     }
+    // open的时候，一定会初始化gcry_hd_t，因此需要先释放gcry_hd_t
+    gcry_md_close(hd->gcry_hd_t);
+    if (UadkEnabled() == true) {
+        uadk_md_close(hd);
+    }
+    free(hd);
 #else
-    gcry_md_close((gcry_md_hd_t)hd);
+    if (NULL == hd) {
+        return;
+    }
+    gcry_md_close(hd->gcry_hd_t);
+    free(hd);
 #endif
 }
 
@@ -502,12 +504,12 @@ void gcry_uadk_md_reset(gcry_uadk_sha2_hd_t hd) {
     if (hd->use_uadk) {
         uadk_md_reset(hd);
         if (hd->use_gcry) {
-            gcry_md_reset((gcry_md_hd_t)hd);
+            gcry_md_reset(hd->gcry_hd_t);
         }
     } else {
-        gcry_md_reset((gcry_md_hd_t)hd);
+        gcry_md_reset(hd->gcry_hd_t);
     }
 #else
-    gcry_md_reset((gcry_md_hd_t)hd);
+    gcry_md_reset(hd->gcry_hd_t);
 #endif
 }

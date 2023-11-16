@@ -464,6 +464,7 @@ IFMUadkShareOpdata *get_uadk_opdata(UadkQueueAlgType alg_type)
         return NULL;
     }
     if (0 != alloc_blk(alg_type, new_opdata)) {
+        free(new_opdata);
         return NULL;
     }
     new_opdata->is_used = true;
@@ -530,7 +531,9 @@ void free_uadk_opdata(UadkQueueAlgType alg_type, IFMUadkShareOpdata *opdata)
             cur_opdata->is_used = false;
             switch (alg_type) {
                 case IFM_UADK_ALG_DIGEST:
+                    // 此处需要考虑后续将in和out的内容设置为0
                     digest_opdata = (struct wcrypto_digest_op_data *)cur_opdata->opdata;
+                    memset(digest_opdata->in, 0, digest_opdata->in_bytes);
                     digest_opdata->in_bytes = 0;
                     digest_opdata->out_bytes = 0;
                     digest_opdata->priv = 0;
@@ -539,6 +542,7 @@ void free_uadk_opdata(UadkQueueAlgType alg_type, IFMUadkShareOpdata *opdata)
                     break;
                 case IFM_UADK_ALG_CIPHER:
                     cipher_opdata = (struct wcrypto_cipher_op_data *)cur_opdata->opdata;
+                    memset(cipher_opdata->in, 0, cipher_opdata->in_bytes);
                     cipher_opdata->in_bytes = 0;
                     cipher_opdata->out_bytes = 0;
                     cipher_opdata->iv_bytes = 0;
@@ -547,6 +551,7 @@ void free_uadk_opdata(UadkQueueAlgType alg_type, IFMUadkShareOpdata *opdata)
                     break;
                 case IFM_UADK_ALG_AEAD:
                     aead_opdata = (struct wcrypto_aead_op_data *)cur_opdata->opdata;
+                    memset(aead_opdata->in, 0, aead_opdata->in_bytes);
                     aead_opdata->in_bytes = 0;
                     aead_opdata->out_bytes = 0;
                     aead_opdata->iv_bytes = 0;

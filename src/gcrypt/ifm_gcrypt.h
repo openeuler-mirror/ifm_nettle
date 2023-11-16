@@ -29,6 +29,8 @@
 #include <stddef.h>
 #include <stdint.h>
 #include <gcrypt.h>
+#include "gcry_uadk_aes.h"
+#include "gcry_uadk_sha2.h"
 
 #ifdef __cplusplus
 extern "C" {
@@ -49,6 +51,7 @@ extern "C" {
 #define gcry_cipher_ctl ifm_gcry_cipher_ctl
 #define gcry_cipher_checktag ifm_gcry_cipher_checktag
 #define gcry_cipher_gettag ifm_gcry_cipher_gettag
+#define gcry_cipher_setctr ifm_gcry_cipher_setctr
 
 #define gcry_md_open ifm_gcry_md_open
 #define gcry_md_enable ifm_gcry_md_enable
@@ -76,53 +79,55 @@ extern "C" {
 #define gcry_md_copy ifm_gcry_md_copy
 #define gcry_md_reset ifm_gcry_md_reset
 
-gcry_error_t ifm_gcry_cipher_open(gcry_cipher_hd_t *handle, int algo, int mode, unsigned int flags);
+gcry_error_t ifm_gcry_cipher_open(gcry_uadk_aes_hd_t *handle, int algo, int mode, unsigned int flags);
 
-gcry_error_t ifm_gcry_cipher_setkey(gcry_cipher_hd_t hd, const void *key, size_t keylen);
+gcry_error_t ifm_gcry_cipher_setkey(gcry_uadk_aes_hd_t hd, const void *key, size_t keylen);
 
-gcry_error_t ifm_gcry_cipher_encrypt(gcry_cipher_hd_t h, void *out, size_t outsize, const void *in, size_t inlen);
+gcry_error_t ifm_gcry_cipher_encrypt(gcry_uadk_aes_hd_t h, void *out, size_t outsize, const void *in, size_t inlen);
 
-void ifm_gcry_cipher_close(gcry_cipher_hd_t h);
+void ifm_gcry_cipher_close(gcry_uadk_aes_hd_t h);
 
-gcry_error_t ifm_gcry_cipher_setiv(gcry_cipher_hd_t hd, const void *iv, size_t ivlen);
+gcry_error_t ifm_gcry_cipher_setiv(gcry_uadk_aes_hd_t hd, const void *iv, size_t ivlen);
 
-gcry_error_t ifm_gcry_cipher_decrypt(gcry_cipher_hd_t h, void *out, size_t outsize, const void *in, size_t inlen);
+gcry_error_t ifm_gcry_cipher_decrypt(gcry_uadk_aes_hd_t h, void *out, size_t outsize, const void *in, size_t inlen);
 
 size_t ifm_gcry_cipher_get_algo_keylen(int algo);
 
 size_t ifm_gcry_cipher_get_algo_blklen(int algo);
 
-gcry_error_t ifm_gcry_cipher_ctl(gcry_cipher_hd_t h, int cmd, void *buffer, size_t buflen);
+gcry_error_t ifm_gcry_cipher_ctl(gcry_uadk_aes_hd_t h, int cmd, void *buffer, size_t buflen);
 
-gcry_error_t ifm_gcry_cipher_gettag(gcry_cipher_hd_t hd, void *outtag, size_t taglen);
+gcry_error_t ifm_gcry_cipher_gettag(gcry_uadk_aes_hd_t hd, void *outtag, size_t taglen);
 
-gcry_error_t ifm_gcry_cipher_checktag(gcry_cipher_hd_t hd, const void *intag, size_t taglen);
+gcry_error_t ifm_gcry_cipher_checktag(gcry_uadk_aes_hd_t hd, const void *intag, size_t taglen);
+
+gpg_error_t ifm_gcry_cipher_setctr(gcry_uadk_aes_hd_t hd, const void *ctr, size_t ctrlen);
 
 /* Create a message digest object for algorithm ALGO.  FLAGS may be
    given as an bitwise OR of the gcry_md_flags values.  ALGO may be
    given as 0 if the algorithms to be used are later set using
    gcry_md_enable. */
-gcry_error_t ifm_gcry_md_open(gcry_md_hd_t *h, int algo, unsigned int flags);
+gcry_error_t ifm_gcry_md_open(gcry_uadk_sha2_hd_t *h, int algo, unsigned int flags);
 
 /* Retrieve various information about the algorithm ALGO. */
 gcry_error_t ifm_gcry_md_algo_info(int algo, int what, void *buffer, size_t *nbytes);
 
-gcry_error_t ifm_gcry_md_enable(gcry_md_hd_t hd, int algo);
+gcry_error_t ifm_gcry_md_enable(gcry_uadk_sha2_hd_t hd, int algo);
 
-void ifm_gcry_md_write(gcry_md_hd_t hd, const void *buffer, size_t length);
+void ifm_gcry_md_write(gcry_uadk_sha2_hd_t hd, const void *buffer, size_t length);
 
-gcry_err_code_t ifm_gcry_md_copy(gcry_md_hd_t *src, gcry_md_hd_t dst);
+gcry_err_code_t ifm_gcry_md_copy(gcry_uadk_sha2_hd_t *src, gcry_uadk_sha2_hd_t dst);
 
-void ifm_gcry_md_reset(gcry_md_hd_t hd);
+void ifm_gcry_md_reset(gcry_uadk_sha2_hd_t hd);
 
-unsigned char *ifm_gcry_md_read(gcry_md_hd_t hd, int algo);
+unsigned char *ifm_gcry_md_read(gcry_uadk_sha2_hd_t hd, int algo);
 
-void ifm_gcry_md_close(gcry_md_hd_t hd);
+void ifm_gcry_md_close(gcry_uadk_sha2_hd_t hd);
 
 void ifm_gcry_md_hash_buffer(int algo, void *digest,
                              const void *buffer, size_t length);
 
-gcry_error_t ifm_gcry_md_setkey(gcry_md_hd_t hd, const void *key, size_t keylen);
+gcry_error_t ifm_gcry_md_setkey(gcry_uadk_sha2_hd_t hd, const void *key, size_t keylen);
 
 /************************************
  *                                  *

@@ -25,6 +25,10 @@
 
 #include "ifm_gcrypt.h"
 #include "test_gcrypt_h/stopwatch.h"
+#define gcry_md_handle gcry_uadk_sha2_hd
+#define gcry_md_hd_t gcry_uadk_sha2_hd_t
+#define gcry_cipher_handle gcry_uadk_aes_hd
+#define gcry_cipher_hd_t gcry_uadk_aes_hd_t
 
 typedef unsigned long long u64;
 

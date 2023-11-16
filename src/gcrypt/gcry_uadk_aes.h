@@ -23,7 +23,7 @@
 #ifndef GCRY_UADK_AES
 #define GCRY_UADK_AES
 
-#include "uadk_aes_meta.h"
+#include "gcrypt_aes_meta.h"
 
 gcry_error_t gcry_uadk_cipher_open(gcry_uadk_aes_hd_t *hd, int algo, int mode, unsigned int flags);
 gcry_error_t gcry_uadk_cipher_setkey(gcry_uadk_aes_hd_t hd, const void *key, size_t keylen);

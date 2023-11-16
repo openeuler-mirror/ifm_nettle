@@ -100,6 +100,7 @@ if (ENABLE_LIBIFM_LIBGCRYPT)
     add_library(libifm_libgcrypt SHARED ${gcrypt_srcs})
 
     set(libifm_libgcrypt_incs
+        ${CMAKE_CURRENT_SOURCE_DIR}/
         ${CMAKE_CURRENT_SOURCE_DIR}/gcrypt
         ${CMAKE_BINARY_DIR}/conf
         ${check_incs}
