@@ -118,6 +118,7 @@ fail (const char *format, ...)
 #ifdef HAVE_FLOCKFILE
   funlockfile (stderr);
 #endif
+  ASSERT(0);
   if (die_on_error)
     exit (1);
   error_count++;

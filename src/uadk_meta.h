@@ -46,6 +46,7 @@ struct uadk_digest_st {
     IFMUadkShareOpdata *p_share_opdata;
     void *pool;
     void *ctx;
+    bool last_data_todo;        // 该字段用于表示是否还有最后一段数据未处理
 };
 struct uadk_cipher_st {
     struct wd_queue *q;

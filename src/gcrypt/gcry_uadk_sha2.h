@@ -23,7 +23,7 @@
 #ifndef GCRY_UADK_SHA2
 #define GCRY_UADK_SHA2
 
-#include "uadk_sha2_meta.h"
+#include "gcrypt_sha2_meta.h"
 
 gcry_error_t gcry_uadk_md_open(gcry_uadk_sha2_hd_t *hd, int algo, unsigned int flags);
 gcry_error_t gcry_uadk_md_enable(gcry_uadk_sha2_hd_t hd, int algo);

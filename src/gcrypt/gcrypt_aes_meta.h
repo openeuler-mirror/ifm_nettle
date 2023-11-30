@@ -1,5 +1,5 @@
 /******************************************************************************
- * uadk_aes_meta.h: meta for gcry_uadk_aes
+ * gcrypt_aes_meta.h: meta for gcry_uadk_aes
  *
  * Copyright (c) Huawei Technologies Co., Ltd. 2020. All rights reserved.
  *
@@ -21,11 +21,11 @@
  * Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA  02110-1301  USA
  ********************************************************************************/
 
-#ifndef GCRY_UADK_AES_META_INCLUDED
-#define GCRY_UADK_AES_META_INCLUDED
+#ifndef GCRY_AES_META_INCLUDED
+#define GCRY_AES_META_INCLUDED
 
-#include <../uadk_meta.h>
 #include <gcrypt.h>
+#include "uadk_meta.h"
 
 #ifdef __aarch64__
 #include "uadk/v1/wd.h"
@@ -46,16 +46,6 @@ extern "C" {
 
 #define MAX_KEY_SIZE 128
 #define CIPHER_IV_SIZE 16
-
-struct uadk_cipher_struct {
-    struct wd_queue *pq;
-    struct wcrypto_cipher_ctx_setup setup;
-    struct wcrypto_cipher_op_data opdata;
-
-    void *pool;
-    void *ctx;
-    int alg;
-};
 #endif
 
 typedef struct gcry_uadk_aes_hd {
@@ -63,7 +53,8 @@ typedef struct gcry_uadk_aes_hd {
     gcry_cipher_hd_t gcry_hd_t;
 
 #ifdef __aarch64__
-    struct uadk_cipher_struct uadk_ctx; /* UADK相关的结构体数据 */
+    struct uadk_cipher_st uadk_ctx; /* UADK相关的结构体数据 */
+    enum gcry_cipher_algos alg;
     bool use_uadk;
 
     void *key;
