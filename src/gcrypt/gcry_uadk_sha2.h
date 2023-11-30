@@ -25,13 +25,13 @@
 
 #include "gcrypt_sha2_meta.h"
 
-gcry_error_t gcry_uadk_md_open(gcry_uadk_sha2_hd_t *hd, int algo, unsigned int flags);
-gcry_error_t gcry_uadk_md_enable(gcry_uadk_sha2_hd_t hd, int algo);
-void gcry_uadk_md_write(gcry_uadk_sha2_hd_t hd, const void *buffer, size_t length);
-unsigned char *gcry_uadk_md_read(gcry_uadk_sha2_hd_t hd, int algo);
-void gcry_uadk_md_close(gcry_uadk_sha2_hd_t hd);
-gcry_error_t gcry_uadk_md_setkey(gcry_uadk_sha2_hd_t hd, const void *key, size_t keylen);
-gcry_error_t gcry_uadk_md_copy(gcry_uadk_sha2_hd_t *dst, gcry_uadk_sha2_hd_t src);
-void gcry_uadk_md_reset(gcry_uadk_sha2_hd_t hd);
+gcry_error_t gcry_uadk_md_open(gcry_uadk_md_hd_t *hd, int algo, unsigned int flags);
+gcry_error_t gcry_uadk_md_enable(gcry_uadk_md_hd_t hd, int algo);
+void gcry_uadk_md_write(gcry_uadk_md_hd_t hd, const void *buffer, size_t length);
+unsigned char *gcry_uadk_md_read(gcry_uadk_md_hd_t hd, int algo);
+void gcry_uadk_md_close(gcry_uadk_md_hd_t hd);
+gcry_error_t gcry_uadk_md_setkey(gcry_uadk_md_hd_t hd, const void *key, size_t keylen);
+gcry_error_t gcry_uadk_md_copy(gcry_uadk_md_hd_t *dst, gcry_uadk_md_hd_t src);
+void gcry_uadk_md_reset(gcry_uadk_md_hd_t hd);
 
 #endif

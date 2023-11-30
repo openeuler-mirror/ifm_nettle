@@ -31,6 +31,7 @@ Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA
 #include "uadk/v1/wd_digest.h"
 #include "uadk/v1/wd_cipher.h"
 #include "uadk/v1/wd_aead.h"
+#include "uadk/v1/wd_rsa.h"
 #include "ifm_utils.h"
 
 #define SQE_SIZE    128
@@ -38,6 +39,7 @@ Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA
 #define MAX_BLOCK_NM    128
 #define GCM_MAX_BLOCK_SZ    16 * 1024 * 1024
 #define AES_MAX_BLOCK_SZ    1024*1024*16
+#define RSA_MAX_BLOCK_SZ    4096
 struct uadk_digest_st {
     struct wd_queue *pq;
     struct wcrypto_digest_ctx_setup setup;
@@ -57,6 +59,7 @@ struct uadk_cipher_st {
     IFMUadkShareOpdata *p_share_opdata;
     IFMUadkShareCtx *p_share_ctx;
     enum wcrypto_cipher_mode mode;
+    enum wcrypto_cipher_alg alg;
     bool set_key;
 };
 struct uadk_aead_st {
@@ -66,8 +69,14 @@ struct uadk_aead_st {
     struct wcrypto_aead_op_data *p_opdata;
     IFMUadkShareOpdata *p_share_opdata;
     IFMUadkShareCtx *p_share_ctx;
+    enum wcrypto_cipher_mode mode;
+    enum wcrypto_cipher_alg alg;
     void *pool;
     void *ctx;
+};
+struct uadk_rsa_st {
+    struct wcrypto_rsa_op_data *opdata;
+    struct wcrypto_rsa_ctx *ctx;
 };
 #endif
 

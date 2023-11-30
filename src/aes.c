@@ -26,139 +26,17 @@
  * 1. 不支持数据分段处理，因此最大的数据只支持16M，使用 AES_MAX_BLOCK_SZ 进行限制。
  * 2. 业务使用时，需将入参ctx使用memset置空，则有可能导致未进入该流程初始化，从而在do_cipher时段错误
 */
-
-#ifdef __aarch64__
-#include <string.h>
-#include "uadk_meta.h"
-#endif
-
 #include "nettle/aes.h"
 #include "aes_meta.h"
+#include "cipher.h"
 #include "ifm_utils.h"
-
-#ifdef __aarch64__
-
-/**
- * @ingroup free_cipher_uadk
- * @par 释放uadk_ctx申请的资源信息
- */
-void free_cipher_uadk(struct uadk_cipher_st *uadk_ctx)
-{
-    free_uadk_opdata(IFM_UADK_ALG_CIPHER, uadk_ctx->p_share_opdata);
-    free_uadk_ctx(IFM_UADK_ALG_CIPHER, uadk_ctx->p_share_ctx);
-    uadk_ctx->ctx = NULL;
-    uadk_ctx->p_share_ctx = NULL;
-    uadk_ctx->p_share_opdata = NULL;
-    uadk_ctx->set_key = false;
-}
-
-/**
- * @ingroup uadk_aes_init
- * @par nettle没有aes初始化函数，需要在uadk_aes_set_key时调用此函数初始化UADK，返回0代表成功
- */
-int uadk_aes_init(struct uadk_cipher_st *uadk_ctx)
-{
-    IFMUadkShareCtx *p_share_ctx = NULL;
-
-    p_share_ctx = get_uadk_ctx(IFM_UADK_ALG_CIPHER, WCRYPTO_CIPHER_AES, uadk_ctx->mode, false);
-    if (p_share_ctx == NULL) {
-        IFM_ERR("uadk_aes_init get_uadk_ctx failed\n");
-        return -1;
-    }
-    uadk_ctx->ctx = p_share_ctx->ctx;
-    uadk_ctx->p_share_ctx = p_share_ctx;
-
-    return 0;
-}
-
-/**
- * @ingroup uadk_aes_set_key
- * @par 适配uadk的wcrypto_set_cipher_key函数，返回0代表成功
- */
-int uadk_aes_set_key(struct uadk_cipher_st *uadk_ctx, const uint8_t *uadk_key, uint16_t key_len)
-{
-    int ret = 0;
-    if (uadk_ctx == NULL || uadk_key == NULL) {
-        return -1;
-    }
-    ret = uadk_aes_init(uadk_ctx);
-    if (ret != 0) {
-        return ret;
-    }
-    ret = wcrypto_set_cipher_key(uadk_ctx->ctx, (uint8_t *)uadk_key, key_len);
-    if (0 == ret) {
-        uadk_ctx->set_key = true;
-    }
-    return ret;
-}
-
-/**
- * @ingroup uadk_aes_do_cipher
- * @par 适配uadk的wcrypto_do_cipher函数执行加密、解密运算，对应nettle的encrypt和decrypt接口，
- * @par 模式为CBC到时候，iiv内容不能为空
- */
-void uadk_aes_do_cipher(struct uadk_cipher_st *uadk_ctx,
-                        uint8_t *iiv, uint8_t *dst,
-                        const uint8_t *src,
-                        size_t length,
-                        bool encrypt)
-{
-    // length 应大于 0 且为 AES_BLOCK_SIZE 的整数倍，如 16, 32, 48, 64 等等
-    if (uadk_ctx == NULL || dst == NULL || src == NULL || length <= 0 || \
-        length % AES_BLOCK_SIZE != 0) {
-        // 加密失败的情况下，将dst设置为0
-        if (dst != NULL) {
-            memset(dst, 0, length);
-        }
-        return;
-    }
-
-    uadk_aes_init(uadk_ctx);
-
-    uadk_ctx->p_share_opdata = get_uadk_opdata(WCRYPTO_CIPHER_AES);
-    if (uadk_ctx->p_share_opdata == NULL) {
-        IFM_ERR("uadk_aes_do_cipher get_uadk_opdata failed\n");
-        memset(dst, 0, length);
-        return;
-    }
-    uadk_ctx->p_opdata = (struct wcrypto_cipher_op_data *)(uadk_ctx->p_share_opdata->opdata);
-
-    if (encrypt) {
-        uadk_ctx->p_opdata->op_type = WCRYPTO_CIPHER_ENCRYPTION;
-    } else {
-        uadk_ctx->p_opdata->op_type = WCRYPTO_CIPHER_DECRYPTION;
-    }
-
-    // 由于当前UADK v1接口不支持cipher的分段，因此最大只能一次性处理AES_MAX_BLOCK_SZ大小的数据
-    uadk_ctx->p_opdata->in_bytes = uadk_ctx->p_opdata->out_bytes = length;
-    memcpy(uadk_ctx->p_opdata->in, src, uadk_ctx->p_opdata->in_bytes);
-    memset(uadk_ctx->p_opdata->out, 0, uadk_ctx->p_opdata->out_bytes);
-    // 加密解密模式为CBC的时候，iiv不能为空
-    if (NULL != iiv) {
-        memcpy(uadk_ctx->p_opdata->iv, iiv, AES128_KEY_SIZE);
-        uadk_ctx->p_opdata->iv_bytes = AES128_KEY_SIZE;
-    }
-    if (0 != wcrypto_do_cipher(uadk_ctx->ctx, uadk_ctx->p_opdata, NULL)) {
-        // 加密失败的情况下，将dst设置为0
-        if (dst != NULL) {
-            memset(dst, 0, length);
-        }
-        free_cipher_uadk(uadk_ctx);
-        return;
-    }
-
-    memcpy(dst, uadk_ctx->p_opdata->out, uadk_ctx->p_opdata->out_bytes);
-
-    free_cipher_uadk(uadk_ctx);
-}
-#endif
 
 void ifm_aes128_set_encrypt_key(struct ifm_aes128_ctx *ctx, const uint8_t *key)
 {
     aes128_set_encrypt_key((struct aes128_ctx *)ctx, key);
 #ifdef __aarch64__
-    // 由于nettle中的CBC模式以及ECB模式用的都是uadk_aes_set_key，但是uadk中需要根据mode不同
-    // 设置不同的ctx值，因此在set_key的时候，不调用uadk_aes_set_key，只是将uadk_key保存下来
+    // 由于nettle中的CBC模式以及ECB模式用的都是uadk_cipher_set_key，但是uadk中需要根据mode不同
+    // 设置不同的ctx值，因此在set_key的时候，不调用uadk_cipher_set_key，只是将uadk_key保存下来
     if (UadkEnabled()) {
         ctx->use_uadk = true;
         memset(ctx->uadk_key, 0, sizeof(ctx->uadk_key));
@@ -174,8 +52,8 @@ void ifm_aes128_set_decrypt_key(struct ifm_aes128_ctx *ctx, const uint8_t *key)
 {
     aes128_set_decrypt_key((struct aes128_ctx *)ctx, key);
 #ifdef __aarch64__
-    // 由于nettle中的CBC模式以及ECB模式用的都是uadk_aes_set_key，但是uadk中需要根据mode不同
-    // 设置不同的ctx值，因此在set_key的时候，不调用uadk_aes_set_key，只是将uadk_key保存下来
+    // 由于nettle中的CBC模式以及ECB模式用的都是uadk_cipher_set_key，但是uadk中需要根据mode不同
+    // 设置不同的ctx值，因此在set_key的时候，不调用uadk_cipher_set_key，只是将uadk_key保存下来
     if (UadkEnabled()) {
         ctx->use_uadk = true;
         memset(ctx->uadk_key, 0, sizeof(ctx->uadk_key));
@@ -191,7 +69,7 @@ void ifm_aes128_invert_key(struct ifm_aes128_ctx *dst, const struct ifm_aes128_c
 {
     aes128_invert_key((struct aes128_ctx *)dst, (const struct aes128_ctx *)src);
 #ifdef __aarch64__
-    if (UadkEnabled() && uadk_aes_set_key(&(dst->uadk_ctx), src->uadk_key, AES128_KEY_SIZE) == 0) {
+    if (UadkEnabled() && uadk_cipher_set_key(&(dst->uadk_ctx), src->uadk_key, AES128_KEY_SIZE) == 0) {
         dst->use_uadk = true;
         memcpy(dst->uadk_key, src->uadk_key, sizeof(dst->uadk_key));
         dst->uadk_ctx.set_key = false;
@@ -208,11 +86,12 @@ void ifm_aes128_encrypt(struct ifm_aes128_ctx *ctx, size_t length, uint8_t *dst,
 
     // UADK不支持处理长度为0的字符串
     if (ctx->use_uadk == true && length > 0 && length < AES_MAX_BLOCK_SZ) {
-        // 实际的ifm_XXX_set_encrypt_key中未调用uadk_aes_set_key，在此处设置mode之后再调用uadk_aes_set_key
+        // 实际的ifm_XXX_set_encrypt_key中未调用uadk_cipher_set_key，在此处设置mode之后再调用uadk_cipher_set_key
         if (ctx->uadk_ctx.ctx == NULL
             || ctx->uadk_ctx.set_key == false) {
             ctx->uadk_ctx.mode = WCRYPTO_CIPHER_ECB;
-            ret = uadk_aes_set_key(&(ctx->uadk_ctx), ctx->uadk_key, AES128_KEY_SIZE);
+            ctx->uadk_ctx.alg = WCRYPTO_CIPHER_AES;
+            ret = uadk_cipher_set_key(&(ctx->uadk_ctx), ctx->uadk_key, AES128_KEY_SIZE);
             if (ret != 0) {
                 IFM_ERR("ifm_aes128_encrypt set key failed.");
                 ctx->use_uadk = false;
@@ -220,7 +99,7 @@ void ifm_aes128_encrypt(struct ifm_aes128_ctx *ctx, size_t length, uint8_t *dst,
                 return;
             }
         }
-        uadk_aes_do_cipher((struct uadk_cipher_st *)&(ctx->uadk_ctx), NULL, dst, src, length, true);
+        uadk_do_cipher((struct uadk_cipher_st *)&(ctx->uadk_ctx), NULL, dst, src, length, true);
     } else {
         memset(dst, 0, length);
         aes128_encrypt((const struct aes128_ctx *)ctx, length, dst, src);
@@ -237,13 +116,14 @@ void ifm_aes128_decrypt(struct ifm_aes128_ctx *ctx, size_t length, uint8_t *dst,
 
     // UADK不支持处理长度为0的字符串
     if (ctx->use_uadk == true && length > 0 && length < AES_MAX_BLOCK_SZ) {
-        // 实际的ifm_XXX_set_encrypt_key中未调用uadk_aes_set_key，在此处设置mode之后再调用uadk_aes_set_key
+        // 实际的ifm_XXX_set_encrypt_key中未调用uadk_cipher_set_key，在此处设置mode之后再调用uadk_cipher_set_key
         // 如果业务使用时，未将ctx使用memset置空，则有可能导致未进入该流程初始化，从而在do_cipher时段错误
         // 由于有可能在ctx申请之后，重复再设置uadk_key，因此需要考虑ctx不为空但是key不一致的场景。
         if (ctx->uadk_ctx.ctx == NULL
             || ctx->uadk_ctx.set_key == false) {
             ctx->uadk_ctx.mode = WCRYPTO_CIPHER_ECB;
-            ret = uadk_aes_set_key(&(ctx->uadk_ctx), ctx->uadk_key, AES128_KEY_SIZE);
+            ctx->uadk_ctx.alg = WCRYPTO_CIPHER_AES;
+            ret = uadk_cipher_set_key(&(ctx->uadk_ctx), ctx->uadk_key, AES128_KEY_SIZE);
             if (ret != 0) {
                 IFM_ERR("ifm_aes128_decrypt set key failed.");
                 ctx->use_uadk = false;
@@ -251,7 +131,7 @@ void ifm_aes128_decrypt(struct ifm_aes128_ctx *ctx, size_t length, uint8_t *dst,
                 return;
             }
         }
-        uadk_aes_do_cipher((struct uadk_cipher_st *)&(ctx->uadk_ctx), NULL, dst, src, length, false);
+        uadk_do_cipher((struct uadk_cipher_st *)&(ctx->uadk_ctx), NULL, dst, src, length, false);
     } else {
         aes128_decrypt((const struct aes128_ctx *)ctx, length, dst, src);
     }
@@ -264,8 +144,8 @@ void ifm_aes192_set_encrypt_key(struct ifm_aes192_ctx *ctx, const uint8_t *key)
 {
     aes192_set_encrypt_key((struct aes192_ctx *)ctx, key);
 #ifdef __aarch64__
-    // 由于nettle中的CBC模式以及ECB模式用的都是uadk_aes_set_key，但是uadk中需要根据mode不同
-    // 设置不同的ctx值，因此在set_key的时候，不调用uadk_aes_set_key，只是将uadk_key保存下来
+    // 由于nettle中的CBC模式以及ECB模式用的都是uadk_cipher_set_key，但是uadk中需要根据mode不同
+    // 设置不同的ctx值，因此在set_key的时候，不调用uadk_cipher_set_key，只是将uadk_key保存下来
     if (UadkEnabled()) {
         ctx->use_uadk = true;
         memset(ctx->uadk_key, 0, sizeof(ctx->uadk_key));
@@ -281,8 +161,8 @@ void ifm_aes192_set_decrypt_key(struct ifm_aes192_ctx *ctx, const uint8_t *key)
 {
     aes192_set_decrypt_key((struct aes192_ctx *)ctx, key);
 #ifdef __aarch64__
-    // 由于nettle中的CBC模式以及ECB模式用的都是uadk_aes_set_key，但是uadk中需要根据mode不同
-    // 设置不同的ctx值，因此在set_key的时候，不调用uadk_aes_set_key，只是将uadk_key保存下来
+    // 由于nettle中的CBC模式以及ECB模式用的都是uadk_cipher_set_key，但是uadk中需要根据mode不同
+    // 设置不同的ctx值，因此在set_key的时候，不调用uadk_cipher_set_key，只是将uadk_key保存下来
     if (UadkEnabled()) {
         ctx->use_uadk = true;
         memset(ctx->uadk_key, 0, sizeof(ctx->uadk_key));
@@ -298,7 +178,7 @@ void ifm_aes192_invert_key(struct ifm_aes192_ctx *dst, const struct ifm_aes192_c
 {
     aes192_invert_key((struct aes192_ctx *)dst, (const struct aes192_ctx *)src);
 #ifdef __aarch64__
-    if (UadkEnabled() && uadk_aes_set_key(&(dst->uadk_ctx), src->uadk_key, AES192_KEY_SIZE) == 0) {
+    if (UadkEnabled() && uadk_cipher_set_key(&(dst->uadk_ctx), src->uadk_key, AES192_KEY_SIZE) == 0) {
         dst->use_uadk = true;
         memcpy(dst->uadk_key, src->uadk_key, sizeof(dst->uadk_key));
         dst->uadk_ctx.set_key = false;
@@ -315,11 +195,12 @@ void ifm_aes192_encrypt(struct ifm_aes192_ctx *ctx, size_t length, uint8_t *dst,
 
     // UADK不支持处理长度为0的字符串
     if (ctx->use_uadk == true && length > 0 && length < AES_MAX_BLOCK_SZ) {
-        // 实际的ifm_XXX_set_encrypt_key中未调用uadk_aes_set_key，在此处设置mode之后再调用uadk_aes_set_key
+        // 实际的ifm_XXX_set_encrypt_key中未调用uadk_cipher_set_key，在此处设置mode之后再调用uadk_cipher_set_key
         if (ctx->uadk_ctx.ctx == NULL
             || ctx->uadk_ctx.set_key == false) {
             ctx->uadk_ctx.mode = WCRYPTO_CIPHER_ECB;
-            ret = uadk_aes_set_key(&(ctx->uadk_ctx), ctx->uadk_key, AES192_KEY_SIZE);
+            ctx->uadk_ctx.alg = WCRYPTO_CIPHER_AES;
+            ret = uadk_cipher_set_key(&(ctx->uadk_ctx), ctx->uadk_key, AES192_KEY_SIZE);
             if (ret != 0) {
                 IFM_ERR("ifm_aes192_encrypt set key failed.");
                 ctx->use_uadk = false;
@@ -327,7 +208,7 @@ void ifm_aes192_encrypt(struct ifm_aes192_ctx *ctx, size_t length, uint8_t *dst,
                 return;
             }
         }
-        uadk_aes_do_cipher((struct uadk_cipher_st *)&(ctx->uadk_ctx), NULL, dst, src, length, true);
+        uadk_do_cipher((struct uadk_cipher_st *)&(ctx->uadk_ctx), NULL, dst, src, length, true);
     } else {
         aes192_encrypt((const struct aes192_ctx *)ctx, length, dst, src);
     }
@@ -343,11 +224,12 @@ void ifm_aes192_decrypt(struct ifm_aes192_ctx *ctx, size_t length, uint8_t *dst,
 
     // UADK不支持处理长度为0的字符串
     if (ctx->use_uadk == true && length > 0 && length < AES_MAX_BLOCK_SZ) {
-        // 实际的ifm_XXX_set_encrypt_key中未调用uadk_aes_set_key，在此处设置mode之后再调用uadk_aes_set_key
+        // 实际的ifm_XXX_set_encrypt_key中未调用uadk_cipher_set_key，在此处设置mode之后再调用uadk_cipher_set_key
         if (ctx->uadk_ctx.ctx == NULL
             || ctx->uadk_ctx.set_key == false) {
             ctx->uadk_ctx.mode = WCRYPTO_CIPHER_ECB;
-            ret = uadk_aes_set_key(&(ctx->uadk_ctx), ctx->uadk_key, AES192_KEY_SIZE);
+            ctx->uadk_ctx.alg = WCRYPTO_CIPHER_AES;
+            ret = uadk_cipher_set_key(&(ctx->uadk_ctx), ctx->uadk_key, AES192_KEY_SIZE);
             if (ret != 0) {
                 IFM_ERR("ifm_aes192_decrypt set key failed.");
                 ctx->use_uadk = false;
@@ -355,7 +237,7 @@ void ifm_aes192_decrypt(struct ifm_aes192_ctx *ctx, size_t length, uint8_t *dst,
                 return;
             }
         }
-        uadk_aes_do_cipher((struct uadk_cipher_st *)&(ctx->uadk_ctx), NULL, dst, src, length, false);
+        uadk_do_cipher((struct uadk_cipher_st *)&(ctx->uadk_ctx), NULL, dst, src, length, false);
     } else {
         aes192_decrypt((const struct aes192_ctx *)ctx, length, dst, src);
     }
@@ -368,8 +250,8 @@ void ifm_aes256_set_encrypt_key(struct ifm_aes256_ctx *ctx, const uint8_t *key)
 {
     aes256_set_encrypt_key((struct aes256_ctx *)ctx, key);
 #ifdef __aarch64__
-    // 由于nettle中的CBC模式以及ECB模式用的都是uadk_aes_set_key，但是uadk中需要根据mode不同
-    // 设置不同的ctx值，因此在set_key的时候，不调用uadk_aes_set_key，只是将uadk_key保存下来
+    // 由于nettle中的CBC模式以及ECB模式用的都是uadk_cipher_set_key，但是uadk中需要根据mode不同
+    // 设置不同的ctx值，因此在set_key的时候，不调用uadk_cipher_set_key，只是将uadk_key保存下来
     if (UadkEnabled()) {
         ctx->use_uadk = true;
         memset(ctx->uadk_key, 0, sizeof(ctx->uadk_key));
@@ -385,8 +267,8 @@ void ifm_aes256_set_decrypt_key(struct ifm_aes256_ctx *ctx, const uint8_t *key)
 {
     aes256_set_decrypt_key((struct aes256_ctx *)ctx, key);
 #ifdef __aarch64__
-    // 由于nettle中的CBC模式以及ECB模式用的都是uadk_aes_set_key，但是uadk中需要根据mode不同
-    // 设置不同的ctx值，因此在set_key的时候，不调用uadk_aes_set_key，只是将uadk_key保存下来
+    // 由于nettle中的CBC模式以及ECB模式用的都是uadk_cipher_set_key，但是uadk中需要根据mode不同
+    // 设置不同的ctx值，因此在set_key的时候，不调用uadk_cipher_set_key，只是将uadk_key保存下来
     if (UadkEnabled()) {
         ctx->use_uadk = true;
         memset(ctx->uadk_key, 0, sizeof(ctx->uadk_key));
@@ -402,7 +284,7 @@ void ifm_aes256_invert_key(struct ifm_aes256_ctx *dst, const struct ifm_aes256_c
 {
     aes256_invert_key((struct aes256_ctx *)dst, (const struct aes256_ctx *)src);
 #ifdef __aarch64__
-    if (UadkEnabled() && uadk_aes_set_key(&(dst->uadk_ctx), src->uadk_key, AES256_KEY_SIZE) == 0) {
+    if (UadkEnabled() && uadk_cipher_set_key(&(dst->uadk_ctx), src->uadk_key, AES256_KEY_SIZE) == 0) {
         dst->use_uadk = true;
         memcpy(dst->uadk_key, src->uadk_key, sizeof(dst->uadk_key));
         dst->uadk_ctx.set_key = false;
@@ -419,11 +301,12 @@ void ifm_aes256_encrypt(struct ifm_aes256_ctx *ctx, size_t length, uint8_t *dst,
 
     // UADK不支持处理长度为0的字符串
     if (ctx->use_uadk == true && length > 0 && length < AES_MAX_BLOCK_SZ) {
-        // 实际的ifm_XXX_set_encrypt_key中未调用uadk_aes_set_key，在此处设置mode之后再调用uadk_aes_set_key
+        // 实际的ifm_XXX_set_encrypt_key中未调用uadk_cipher_set_key，在此处设置mode之后再调用uadk_cipher_set_key
         if (ctx->uadk_ctx.ctx == NULL
             || ctx->uadk_ctx.set_key == false) {
             ctx->uadk_ctx.mode = WCRYPTO_CIPHER_ECB;
-            ret = uadk_aes_set_key(&(ctx->uadk_ctx), ctx->uadk_key, AES256_KEY_SIZE);
+            ctx->uadk_ctx.alg = WCRYPTO_CIPHER_AES;
+            ret = uadk_cipher_set_key(&(ctx->uadk_ctx), ctx->uadk_key, AES256_KEY_SIZE);
             if (ret != 0) {
                 IFM_ERR("ifm_aes256_encrypt set key failed.");
                 ctx->use_uadk = false;
@@ -431,7 +314,7 @@ void ifm_aes256_encrypt(struct ifm_aes256_ctx *ctx, size_t length, uint8_t *dst,
                 return;
             }
         }
-        uadk_aes_do_cipher((struct uadk_cipher_st *)&(ctx->uadk_ctx), NULL, dst, src, length, true);
+        uadk_do_cipher((struct uadk_cipher_st *)&(ctx->uadk_ctx), NULL, dst, src, length, true);
     } else {
         aes256_encrypt((const struct aes256_ctx *)ctx, length, dst, src);
     }
@@ -447,11 +330,12 @@ void ifm_aes256_decrypt(struct ifm_aes256_ctx *ctx, size_t length, uint8_t *dst,
 
     // UADK不支持处理长度为0的字符串
     if (ctx->use_uadk == true && length > 0 && length < AES_MAX_BLOCK_SZ) {
-        // 实际的ifm_XXX_set_encrypt_key中未调用uadk_aes_set_key，在此处设置mode之后再调用uadk_aes_set_key
+        // 实际的ifm_XXX_set_encrypt_key中未调用uadk_cipher_set_key，在此处设置mode之后再调用uadk_cipher_set_key
         if (ctx->uadk_ctx.ctx == NULL
             || ctx->uadk_ctx.set_key == false) {
             ctx->uadk_ctx.mode = WCRYPTO_CIPHER_ECB;
-            ret = uadk_aes_set_key(&(ctx->uadk_ctx), ctx->uadk_key, AES256_KEY_SIZE);
+            ctx->uadk_ctx.alg = WCRYPTO_CIPHER_AES;
+            ret = uadk_cipher_set_key(&(ctx->uadk_ctx), ctx->uadk_key, AES256_KEY_SIZE);
             if (ret != 0) {
                 IFM_ERR("ifm_aes256_decrypt set key failed.");
                 ctx->use_uadk = false;
@@ -459,7 +343,7 @@ void ifm_aes256_decrypt(struct ifm_aes256_ctx *ctx, size_t length, uint8_t *dst,
                 return;
             }
         }
-        uadk_aes_do_cipher((struct uadk_cipher_st *)&(ctx->uadk_ctx), NULL, dst, src, length, false);
+        uadk_do_cipher((struct uadk_cipher_st *)&(ctx->uadk_ctx), NULL, dst, src, length, false);
     } else {
         aes256_decrypt((const struct aes256_ctx *)ctx, length, dst, src);
     }

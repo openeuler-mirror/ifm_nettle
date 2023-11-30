@@ -1,10 +1,10 @@
 /******************************************************************************
- * gcrypt_sha2_meta.h: meta for gcry_uadk_sha2
+ * sm4.h: uadk sm4
  *
  * Copyright (c) Huawei Technologies Co., Ltd. 2020. All rights reserved.
  *
  * Authors:
- * xinghailiao <xinghailiao@smail.xtu.edu.cn>
+ * Chen-yufanspace <chenyufan912@gmail.com>
  *
  * This library is free software; you can redistribute it and/or
  * modify it under the terms of the GNU Lesser General Public
@@ -20,51 +20,29 @@
  * License along with this library; if not, write to the Free Software
  * Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA  02110-1301  USA
  ********************************************************************************/
-#ifndef GCRY_UADK_SHA2_META_INCLUDED
-#define GCRY_UADK_SHA2_META_INCLUDED
-
-#include <gcrypt.h>
-#include "uadk_meta.h"
-
+#ifndef IFM_NETTLE_SM4_H
+#define IFM_NETTLE_SM4_H
 #ifdef __aarch64__
 #include "uadk/v1/wd.h"
 #include "uadk/v1/wd_bmm.h"
-#include "uadk/v1/wd_digest.h"
+#include "uadk/v1/wd_cipher.h"
 #endif
-
+#include "sm4_meta.h"
 #ifdef __cplusplus
 extern "C" {
 #endif
 
-#ifdef __aarch64__
-#define SHA256_DIGEST_SIZE 32
-#define SHA224_DIGEST_SIZE 28
-#define SHA512_DIGEST_SIZE 64
-#define SHA384_DIGEST_SIZE 48
-#define SM3_DIGEST_SIZE 32
-#define MAX_HMAC_KEY_SIZE 128
-struct gcrypt_digest_struct {
-    struct uadk_digest_st uadk_ctx;
-    enum gcry_md_algos alg;
-};
-#endif
+#define sm4_set_encrypt_key ifm_sm4_set_encrypt_key
+#define sm4_set_decrypt_key ifm_sm4_set_decrypt_key
+#define sm4_crypt ifm_sm4_crypt
 
-typedef struct gcry_uadk_md_hd {
-    gcry_md_hd_t gcry_hd_t;
+void ifm_sm4_set_encrypt_key(struct ifm_sm4_ctx *ctx, const uint8_t *key);
 
-#ifdef __aarch64__
-    int ctx_len;
-    struct gcrypt_digest_struct alg_ctx[5];    /* gcrypt中每种alg的ctx对象，因为gcrypt中可能存在同时配置多种算法的场景 */
-    bool use_uadk;
-    bool use_gcry;
-    void *key;
-    size_t keylen;
-    uint8_t mode;
-#endif
-} *gcry_uadk_md_hd_t;
+void ifm_sm4_set_decrypt_key(struct ifm_sm4_ctx *ctx, const uint8_t *key);
+
+void ifm_sm4_crypt(struct ifm_sm4_ctx *ctx, size_t length, uint8_t *dst, const uint8_t *src);
 
 #ifdef __cplusplus
 }
 #endif
-
 #endif

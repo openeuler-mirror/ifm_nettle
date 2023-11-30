@@ -41,6 +41,7 @@
 #define IFM_NETTLE_GCM_META_INCLUDED
 
 #include "aes_meta.h"
+#include "sm4_meta.h"
 
 #ifdef __aarch64__
 #include "uadk_meta.h"
@@ -56,6 +57,7 @@ extern "C" {
 #define GCM_AES128_KEY_SIZE 16
 #define GCM_AES192_KEY_SIZE 24
 #define GCM_AES256_KEY_SIZE 32
+#define GCM_SM4_KEY_SIZE 16
 
 #define AES128_KEY_SIZE 16
 #define AES192_KEY_SIZE 24
@@ -104,6 +106,7 @@ struct ifm_gcm_ctx {
 struct ifm_gcm_aes128_ctx IFM_GCM_CTX(struct ifm_aes128_ctx);
 struct ifm_gcm_aes192_ctx IFM_GCM_CTX(struct ifm_aes192_ctx);
 struct ifm_gcm_aes256_ctx IFM_GCM_CTX(struct ifm_aes256_ctx);
+struct ifm_gcm_sm4_ctx IFM_GCM_CTX(struct ifm_sm4_ctx);
 
 #ifdef __cplusplus
 }

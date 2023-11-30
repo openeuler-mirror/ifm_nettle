@@ -29,6 +29,10 @@ target_link_libraries(nettle-bench
     libifm_libgcrypt
     libifm_libxcrypt
     gpg-error
+    gmp
+    nettle
+    hogweed
+    ${check_nettle_libs}
     )
 
 target_include_directories(nettle-bench
@@ -38,6 +42,7 @@ target_include_directories(nettle-bench
     PUBLIC ${CMAKE_SOURCE_DIR}/src
     PUBLIC ${CMAKE_SOURCE_DIR}/src/gcrypt
     PUBLIC ${CMAKE_SOURCE_DIR}/src/xcrypt
+    PUBLIC ${libifm_nettle_incs}
     )
 set(CMAKE_BUILD_TYPE Debug)
 set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -g")

@@ -26,6 +26,7 @@
 
 #include <stdbool.h>
 #include "aes.h"
+#include "sm4.h"
 #ifdef __aarch64__
 #include "uadk/v1/wd.h"
 #include "uadk/v1/wd_bmm.h"
@@ -41,6 +42,7 @@ extern "C" {
 #define cbc_aes128_encrypt ifm_nettle_cbc_aes128_encrypt
 #define cbc_aes192_encrypt ifm_nettle_cbc_aes192_encrypt
 #define cbc_aes256_encrypt ifm_nettle_cbc_aes256_encrypt
+#define cbc_sm4_encrypt ifm_nettle_cbc_sm4_encrypt
 
 void ifm_nettle_cbc_encrypt(const void *ctx, nettle_cipher_func *f,
                             size_t block_size, uint8_t *iv,
@@ -80,6 +82,9 @@ void ifm_nettle_cbc_aes192_encrypt(const struct ifm_aes192_ctx *ctx, uint8_t *iv
 
 void ifm_nettle_cbc_aes256_encrypt(const struct ifm_aes256_ctx *ctx, uint8_t *iv,
                                    size_t length, uint8_t *dst, const uint8_t *src);
+
+void ifm_nettle_cbc_sm4_encrypt(const struct ifm_sm4_ctx *ctx, uint8_t *iv,
+                                size_t length, uint8_t *dst, const uint8_t *src);
 
 
 #ifdef __cplusplus

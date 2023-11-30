@@ -23,8 +23,8 @@
 #include <stddef.h>
 #include <gpg-error.h>
 #include "ifm_gcrypt.h"
-#define gcry_md_handle gcry_uadk_sha2_hd
-#define gcry_md_hd_t gcry_uadk_sha2_hd_t
+#define gcry_md_handle gcry_uadk_md_hd
+#define gcry_md_hd_t gcry_uadk_md_hd_t
 
 #define PGM "basic"
 #include "gcrypt_ut_common.h"
@@ -981,6 +981,36 @@ check_digests (void)
                     { GCRY_MD_SHA512_224, "!",
                             "\x37\xab\x33\x1d\x76\xf0\xd3\x6d\xe4\x22\xbd\x0e\xde\xb2\x2a\x28"
                             "\xac\xcd\x48\x7b\x7a\x84\x53\xae\x96\x5d\xd2\x87" },
+                            
+                    { GCRY_MD_SM3, "abc",
+                    "\x66\xc7\xf0\xf4\x62\xee\xed\xd9\xd1\xf2\xd4\x6b\xdc\x10\xe4\xe2"
+                    "\x41\x67\xc4\x87\x5c\xf2\xf7\xa2\x29\x7d\xa0\x2b\x8f\x4b\xa8\xe0" },
+                    { GCRY_MD_SM3,
+                    "abcdbcdecdefdefgefghfghighijhijkijkljklmklmnlmnomnopnopq",
+                    "\x63\x9b\x6c\xc5\xe6\x4d\x9e\x37\xa3\x90\xb1\x92\xdf\x4f\xa1\xea"
+                    "\x07\x20\xab\x74\x7f\xf6\x92\xb9\xf3\x8c\x4e\x66\xad\x7b\x8c\x05" },
+                    { GCRY_MD_SM3, "!",
+                    "\xc8\xaa\xf8\x94\x29\x55\x40\x29\xe2\x31\x94\x1a\x2a\xcc\x0a\xd6"
+                    "\x1f\xf2\xa5\xac\xd8\xfa\xdd\x25\x84\x7a\x3a\x73\x2b\x3b\x02\xc3" },
+                    { GCRY_MD_SM3, "?",
+                    "\x3a\x3f\x53\xfc\x96\xc2\xde\xb2\xd9\x12\x3a\x1b\xd8\x47\x71\x28"
+                    "\xbc\x5d\x5e\x94\xea\x08\x86\x3d\xfb\xe4\x00\x5a\xd9\xed\x79\x26" },
+                    { GCRY_MD_SM3,
+                    "Libgcrypt is free software; you can redistribute it and/or modif"
+                    "y it under the terms of the GNU Lesser general Public License as"
+                    " published by the Free Software Foundation; either version 2.1 o"
+                    "f the License, or (at your option) any later version.\nLibgcrypt"
+                    " is distributed in the hope that it will be useful, but WITHOUT "
+                    "ANY WARRANTY; without even the implied warranty of MERCHANTABILI"
+                    "TY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU Lesser Gene"
+                    "ral Public License for more details.",
+                    "\x8b\x91\x3f\x0e\x85\xae\x43\x25\x6d\x28\x38\x6c\x09\x5c\xc7\x72"
+                    "\xcc\x2e\x78\x89\x7e\x2e\x4e\x5a\x3d\xf6\x55\xfe\x87\xbe\xa6\xbc" },
+                    { GCRY_MD_SM3,
+                        "*",
+                        "\xb6\xfc\x1e\xc4\xad\x9b\x88\xbd\x08\xaa\xf3\xb3\xfa\x4f\x1b\x9c"
+                        "\xd6\x9a\x32\x09\x28\x9e\xda\x3a\x99\xb6\x09\x8f\x35\x99\xa6\x11" },
+
                     { 0 }
             };
     gcry_error_t err;

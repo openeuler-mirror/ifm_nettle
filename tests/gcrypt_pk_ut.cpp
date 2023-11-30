@@ -27,8 +27,8 @@
 #include <ifm_gcrypt.h>
 #define PGM "pkcs1v2"
 #include "gcrypt_ut_common.h"
-#define gcry_md_handle gcry_uadk_sha2_hd
-#define gcry_md_hd_t gcry_uadk_sha2_hd_t
+#define gcry_md_handle gcry_uadk_md_hd
+#define gcry_md_hd_t gcry_uadk_md_hd_t
 
 
 static int in_fips_mode;

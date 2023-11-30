@@ -25,6 +25,7 @@
 
 #include "rsa_meta.h"
 #include "md5_meta.h"
+#include "sha2_meta.h"
 #include "testutils.h"
 #include "cbc.h"
 
@@ -245,7 +246,7 @@ test_cipher_cbc(const struct nettle_cipher *cipher,
 {
   void *ctx = xalloc(cipher->context_size);
   uint8_t *data;
-  uint8_t *iv = xalloc(cipher->block_size);
+  uint8_t *iv = (uint8_t*)xalloc(cipher->block_size);
   size_t length;
 
   ASSERT (cleartext->length == ciphertext->length);
@@ -254,7 +255,7 @@ test_cipher_cbc(const struct nettle_cipher *cipher,
   ASSERT (key->length == cipher->key_size);
   ASSERT (iiv->length == cipher->block_size);
 
-  data = xalloc(length);  
+  data = (uint8_t*)xalloc(length);  
   memset(ctx, 0, cipher->context_size);
   cipher->set_encrypt_key(ctx, key->data);
   memcpy(iv, iiv->data, cipher->block_size);
@@ -311,14 +312,14 @@ test_aead(const struct nettle_aead *aead,
 {
   void *ctx = xalloc(aead->context_size);
   uint8_t *data;
-  uint8_t *buffer = xalloc(aead->digest_size);
+  uint8_t *buffer = (uint8_t*)xalloc(aead->digest_size);
   size_t offset;
 
   ASSERT (cleartext->length == ciphertext->length);
 
   ASSERT (key->length == aead->key_size);
 
-  data = xalloc(cleartext->length);
+  data = (uint8_t*)xalloc(cleartext->length);
   memset(ctx, 0, aead->context_size);
 
   ASSERT(aead->block_size > 0);

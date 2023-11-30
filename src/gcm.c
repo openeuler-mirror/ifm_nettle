@@ -54,7 +54,7 @@ int uadk_ctx_setup(struct uadk_aead_st *uadk_ctx)
 {
     IFMUadkShareCtx *p_share_ctx = NULL;
 
-    p_share_ctx = get_uadk_ctx(IFM_UADK_ALG_AEAD, WCRYPTO_CIPHER_AES, WCRYPTO_CIPHER_GCM, false);
+    p_share_ctx = get_uadk_ctx(IFM_UADK_ALG_AEAD, uadk_ctx->alg, uadk_ctx->mode, false);
     if (p_share_ctx == NULL) {
         IFM_ERR("uadk_ctx_setup: get_uadk_ctx failed\n");
         return FAILED;
@@ -208,6 +208,8 @@ void ifm_gcm_aes128_set_key(struct ifm_gcm_aes128_ctx *ctx, const uint8_t *key)
         ctx->use_uadk = false;
         return;
     }
+    ctx->uadk_ctx.alg = WCRYPTO_CIPHER_AES;
+    ctx->uadk_ctx.mode = WCRYPTO_CIPHER_GCM;
     if ((0 == uadk_gcm_init(&(ctx->uadk_ctx))) &&
         0 == uadk_gcm_set_key(&(ctx->uadk_ctx), (uint8_t *)key, AES128_KEY_SIZE)) {
         ctx->use_uadk = true;
@@ -320,6 +322,8 @@ void ifm_gcm_aes192_set_key(struct ifm_gcm_aes192_ctx *ctx, const uint8_t *key)
         ctx->use_uadk = false;
         return;
     }
+    ctx->uadk_ctx.alg = WCRYPTO_CIPHER_AES;
+    ctx->uadk_ctx.mode = WCRYPTO_CIPHER_GCM;
     if ((0 == uadk_gcm_init(&(ctx->uadk_ctx))) &&
         0 == uadk_gcm_set_key(&(ctx->uadk_ctx), (uint8_t *)key, AES192_KEY_SIZE)) {
         ctx->use_uadk = true;
@@ -431,6 +435,8 @@ void ifm_gcm_aes256_set_key(struct ifm_gcm_aes256_ctx *ctx, const uint8_t *key)
         ctx->use_uadk = false;
         return;
     }
+    ctx->uadk_ctx.alg = WCRYPTO_CIPHER_AES;
+    ctx->uadk_ctx.mode = WCRYPTO_CIPHER_GCM;
     if ((0 == uadk_gcm_init(&(ctx->uadk_ctx))) &&
         0 == uadk_gcm_set_key(&(ctx->uadk_ctx), (uint8_t *)key, AES256_KEY_SIZE)) {
         ctx->use_uadk = true;

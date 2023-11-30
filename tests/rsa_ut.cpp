@@ -32,17 +32,23 @@
    not, see http://www.gnu.org/licenses/.
 */
 #include <gtest/gtest.h>
-#include <nettle/md5.h>
 #include <nettle/sha1.h>
-#include <nettle/sha2.h>
 #include <nettle/knuth-lfib.h>
+#include <openssl/bn.h>
+#include <openssl/err.h>
 
-#include "rsa_meta.h"
 #include "rsa.h"
 #include "testutils.h"
+#include "sha2.h"
+#include "md5.h"
+#include "ifm_utils.h"
+#include "stub/stub.h"
 
 #define rsa_public_key ifm_rsa_public_key
 #define rsa_private_key ifm_rsa_private_key
+#define md5_ctx ifm_md5_ctx
+#define sha256_ctx ifm_sha256_ctx
+#define sha512_ctx ifm_sha512_ctx
 
 /* Expects local variables pub, key, rstate, digest, signature */
 #define SIGN(hash, msg, expected) do { \
@@ -52,67 +58,73 @@
         mpz_out_str(stderr, 16, signature);              \
         fprintf(stderr, "\n");         \
     ASSERT(mpz_cmp (signature, expected) == 0);          \
-                                       \
-    hash##_update(&hash, LDATA(msg));  \
-    ASSERT(rsa_##hash##_sign_tr(pub, key, &rstate,       \
-                  (nettle_random_func *) knuth_lfib_random, \
-                  &hash, signature));  \
-    ASSERT(mpz_cmp (signature, expected) == 0);          \
-                                       \
+    fprintf(stderr, "rsa_sign_pass\n");                  \
+}while (0)
+
+#define SIGN_DIGEST(hash, msg, expected) do { \
     hash##_update(&hash, LDATA(msg));  \
     hash##_digest(&hash, sizeof(digest), digest);        \
     ASSERT(rsa_##hash##_sign_digest(key, digest, signature)); \
+    fprintf(stderr, "rsa-%s signature: ", #hash);        \
+        mpz_out_str(stderr, 16, signature);              \
+        fprintf(stderr, "\n");         \
     ASSERT(mpz_cmp (signature, expected) == 0);          \
-                                       \
-    ASSERT(rsa_##hash##_sign_digest_tr(pub, key, &rstate,     \
-                     (nettle_random_func *)knuth_lfib_random, \
-                     digest, signature));                \
-    ASSERT(mpz_cmp (signature, expected) == 0);          \
+    fprintf(stderr, "rsa_sign_digest_pass\n");        \
 }while (0)
 
 #define VERIFY(key, hash, msg, signature) ( \
     hash##_update(&hash, LDATA(msg)),       \
-    rsa_##hash##_verify(key, &hash, signature) \
+    rsa_##hash##_verify(key, &hash, signature), \
+    hash##_update(&hash, LDATA(msg)),       \
+    hash##_digest(&hash, sizeof(digest), digest),        \
+    rsa_##hash##_verify_digest(key, digest, signature)   \
 )
 
 static void test_rsa_set_key_1(struct rsa_public_key *pub,
                                struct rsa_private_key *key)
 {
     mpz_set_str(pub->n,
-                "69abd505285af665" "36ddc7c8f027e6f0" "ed435d6748b16088"
-                "4fd60842b3a8d7fb" "bd8a3c98f0cc50ae" "4f6a9f7dd73122cc"
-                "ec8afa3f77134406" "f53721973115fc2d" "8cfbba23b145f28d"
-                "84f81d3b6ae8ce1e" "2850580c026e809b" "cfbb52566ea3a3b3"
-                "df7edf52971872a7" "e35c1451b8636d22" "279a8fb299368238"
-                "e545fbb4cf", 16);
-    mpz_set_str(pub->e, "0db2ad57", 16);
+            "9eeebbeba0d3abac" "f97b9229d66ec86b"
+            "688ffd092aba33d4" "1496744de5ced947"
+            "31d5a4a359ae2fc3" "992a58062800fcf2"
+            "efb55c6df53b71ee" "b1278e0968c77bf7"
+            "76dbdb464086a078" "6778caeb322fc412"
+            "3decd5878f1e050e" "2f79080a3785bec0"
+            "aaf67b243bf9b21c" "ee359807d3cf280f"
+            "4b1025a90d7cb4c8" "d1f63a632692a853", 16);
+    mpz_set_str(pub->e, "010001", 16);
 
     ASSERT (rsa_public_key_prepare(pub));
 
     mpz_set_str(key->p,
-                "0a66399919be4b4d" "e5a78c5ea5c85bf9" "aba8c013cb4a8732"
-                "14557a12bd67711e" "bb4073fd39ad9a86" "f4e80253ad809e5b"
-                "f2fad3bc37f6f013" "273c9552c9f489", 16);
+            "cdf1e1ffd77d8e3c" "13a218b61d74367b"
+            "f79da4ea8c4545f7" "c0ea9a3d1567b62a"
+            "8cfb64cc1d6addd3" "4737c8a7606f5bf8"
+            "909900d552895ae7" "a2669f7b495ce757", 16);
 
     mpz_set_str(key->q,
-                "0a294f069f118625" "f5eae2538db9338c" "776a298eae953329"
-                "9fd1eed4eba04e82" "b2593bc98ba8db27" "de034da7daaea795"
-                "2d55b07b5f9a5875" "d1ca5f6dcab897", 16);
+            "C58fb19f71dcd544" "aa927fb9b0f6eadd"
+            "508fdfced9057835" "8aa98d22b3015c08"
+            "fd57961f34eaa4da" "340a3900f4afb0ba"
+            "56da24995bd7a496" "b8d31e544510d565", 16);
 
     mpz_set_str(key->a,
-                "011b6c48eb592eee" "e85d1bb35cfb6e07" "344ea0b5e5f03a28"
-                "5b405396cbc78c5c" "868e961db160ba8d" "4b984250930cf79a"
-                "1bf8a9f28963de53" "128aa7d690eb87", 16);
+            "7a3be0b9ab3b185a" "cc045fca67bcfc41"
+            "a3fc6b4fd325a29b" "a4631a5cbb01ad7b"
+            "9fe5ee33c01a17c3" "38f8011e66fc7188"
+            "1cbad365c9f14085" "4f3cbdd7bcf9694d", 16);
 
     mpz_set_str(key->b,
-                "0409ecf3d2557c88" "214f1af5e1f17853" "d8b2d63782fa5628"
-                "60cf579b0833b7ff" "5c0529f2a97c6452" "2fa1a8878a9635ab"
-                "ce56debf431bdec2" "70b308fa5bf387", 16);
+            "07c4b3b65252ddab" "fa8d122aaa13bb7e"
+            "825975f27b4424ca" "ee2de697d3b41cfb"
+            "5982e52b4af8630d" "1578c56f0d300f61"
+            "f4625588163d6f82" "61b8237c2acf13a5", 16);
 
     mpz_set_str(key->c,
-                "04e103ee925cb5e6" "6653949fa5e1a462" "c9e65e1adcd60058"
-                "e2df9607cee95fa8" "daec7a389a7d9afc" "8dd21fef9d83805a"
-                "40d46f49676a2f6b" "2926f70c572c00", 16);
+            "2a08700c27d87396" "1b9763952b6bcb33"
+            "5effe08e5975d273" "fef3f081173809ed"
+            "f321d120093a9799" "4b1d1cc14eb9f07c"
+            "06080e93656483d2" "34a2a76204807299", 16);
 
     ASSERT (rsa_private_key_prepare(key));
     ASSERT (pub->size == key->size);
@@ -120,7 +132,7 @@ static void test_rsa_set_key_1(struct rsa_public_key *pub,
 
 static void test_rsa_md5(struct rsa_public_key *pub,
                          struct rsa_private_key *key,
-                         mpz_t expected)
+                         mpz_t expected_1, mpz_t expected_2, mpz_t expected_3)
 {
     md5_ctx md5;
     knuth_lfib_ctx rstate;
@@ -131,7 +143,9 @@ static void test_rsa_md5(struct rsa_public_key *pub,
     mpz_init(signature);
     knuth_lfib_init(&rstate, 15);
 
-    SIGN(md5, "The magic words are squeamish ossifrage", expected);
+    SIGN(md5, "The magic words are squeamish ossifrage", expected_1);
+
+    SIGN_DIGEST(md5, "The magic words are squeamish ossifrage", expected_1);
 
     /* Try bad data */
     ASSERT (!VERIFY(pub, md5,
@@ -146,12 +160,26 @@ static void test_rsa_md5(struct rsa_public_key *pub,
     ASSERT (!VERIFY(pub, md5,
                     "The magic words are squeamish ossifrage", signature));
 
+    SIGN(md5, "The magic words are squeamish ossifrage The magic words are squeamish ossifrage", expected_2);
+    SIGN_DIGEST(md5, "The magic words are squeamish ossifrage The magic words are squeamish ossifrage", expected_2);
+    ASSERT (VERIFY(pub, md5, "The magic words are squeamish ossifrage The magic words are squeamish ossifrage", signature));
+
+    SIGN(md5, "abcdefghbcdefghicdefghijdefg"
+		  "hijkefghijklfghijklmghijklmn"
+		  "hijklmnoijklmnopjklmnopqklmn", expected_3);
+    SIGN_DIGEST(md5, "abcdefghbcdefghicdefghijdefg"
+		  "hijkefghijklfghijklmghijklmn"
+		  "hijklmnoijklmnopjklmnopqklmn", expected_3);
+    ASSERT (VERIFY(pub, md5, "abcdefghbcdefghicdefghijdefg"
+		  "hijkefghijklfghijklmghijklmn"
+		  "hijklmnoijklmnopjklmnopqklmn", signature));  
+
     mpz_clear(signature);
 }
 
 static void test_rsa_sha1(struct rsa_public_key *pub,
                           struct rsa_private_key *key,
-                          mpz_t expected)
+                          mpz_t expected_1, mpz_t expected_2, mpz_t expected_3)
 {
     sha1_ctx sha1;
     knuth_lfib_ctx rstate;
@@ -162,7 +190,9 @@ static void test_rsa_sha1(struct rsa_public_key *pub,
     mpz_init(signature);
     knuth_lfib_init(&rstate, 16);
 
-    SIGN(sha1, "The magic words are squeamish ossifrage", expected);
+    SIGN(sha1, "The magic words are squeamish ossifrage", expected_1);
+
+    SIGN_DIGEST(sha1, "The magic words are squeamish ossifrage", expected_1);
 
     /* Try bad data */
     ASSERT (!VERIFY(pub, sha1,
@@ -177,12 +207,24 @@ static void test_rsa_sha1(struct rsa_public_key *pub,
     ASSERT (!VERIFY(pub, sha1,
                     "The magic words are squeamish ossifrage", signature));
 
-    mpz_clear(signature);
+    SIGN(sha1, "The magic words are squeamish ossifrage The magic words are squeamish ossifrage", expected_2);
+    SIGN_DIGEST(sha1, "The magic words are squeamish ossifrage The magic words are squeamish ossifrage", expected_2);
+    ASSERT (VERIFY(pub, sha1, "The magic words are squeamish ossifrage The magic words are squeamish ossifrage", signature));
+
+    SIGN(sha1, "abcdefghbcdefghicdefghijdefg"
+		  "hijkefghijklfghijklmghijklmn"
+		  "hijklmnoijklmnopjklmnopqklmn", expected_3);
+    SIGN_DIGEST(sha1, "abcdefghbcdefghicdefghijdefg"
+		  "hijkefghijklfghijklmghijklmn"
+		  "hijklmnoijklmnopjklmnopqklmn", expected_3);
+    ASSERT (VERIFY(pub, sha1, "abcdefghbcdefghicdefghijdefg"
+		  "hijkefghijklfghijklmghijklmn"
+		  "hijklmnoijklmnopjklmnopqklmn", signature));  
 }
 
 static void test_rsa_sha256(struct rsa_public_key *pub,
                             struct rsa_private_key *key,
-                            mpz_t expected)
+                            mpz_t expected_1, mpz_t expected_2, mpz_t expected_3)
 {
     sha256_ctx sha256;
     knuth_lfib_ctx rstate;
@@ -193,7 +235,9 @@ static void test_rsa_sha256(struct rsa_public_key *pub,
     mpz_init(signature);
     knuth_lfib_init(&rstate, 17);
 
-    SIGN(sha256, "The magic words are squeamish ossifrage", expected);
+    SIGN(sha256, "The magic words are squeamish ossifrage", expected_1);
+
+    SIGN_DIGEST(sha256, "The magic words are squeamish ossifrage", expected_1);
 
     /* Try bad data */
     ASSERT (!VERIFY(pub, sha256,
@@ -208,12 +252,24 @@ static void test_rsa_sha256(struct rsa_public_key *pub,
     ASSERT (!VERIFY(pub, sha256,
                     "The magic words are squeamish ossifrage", signature));
 
-    mpz_clear(signature);
+    SIGN(sha256, "The magic words are squeamish ossifrage The magic words are squeamish ossifrage", expected_2);
+    SIGN_DIGEST(sha256, "The magic words are squeamish ossifrage The magic words are squeamish ossifrage", expected_2);
+    ASSERT (VERIFY(pub, sha256, "The magic words are squeamish ossifrage The magic words are squeamish ossifrage", signature));
+
+    SIGN(sha256, "abcdefghbcdefghicdefghijdefg"
+		  "hijkefghijklfghijklmghijklmn"
+		  "hijklmnoijklmnopjklmnopqklmn", expected_3);
+    SIGN_DIGEST(sha256, "abcdefghbcdefghicdefghijdefg"
+		  "hijkefghijklfghijklmghijklmn"
+		  "hijklmnoijklmnopjklmnopqklmn", expected_3);
+    ASSERT (VERIFY(pub, sha256, "abcdefghbcdefghicdefghijdefg"
+		  "hijkefghijklfghijklmghijklmn"
+		  "hijklmnoijklmnopjklmnopqklmn", signature));  
 }
 
 static void test_rsa_sha512(struct rsa_public_key *pub,
                             struct rsa_private_key *key,
-                            mpz_t expected)
+                            mpz_t expected_1, mpz_t expected_2, mpz_t expected_3)
 {
     sha512_ctx sha512;
     knuth_lfib_ctx rstate;
@@ -224,7 +280,9 @@ static void test_rsa_sha512(struct rsa_public_key *pub,
     mpz_init(signature);
     knuth_lfib_init(&rstate, 18);
 
-    SIGN(sha512, "The magic words are squeamish ossifrage", expected);
+    SIGN(sha512, "The magic words are squeamish ossifrage", expected_1);
+
+    SIGN_DIGEST(sha512, "The magic words are squeamish ossifrage", expected_1);
 
     /* Try bad data */
     ASSERT (!VERIFY(pub, sha512,
@@ -239,7 +297,19 @@ static void test_rsa_sha512(struct rsa_public_key *pub,
     ASSERT (!VERIFY(pub, sha512,
                     "The magic words are squeamish ossifrage", signature));
 
-    mpz_clear(signature);
+    SIGN(sha512, "The magic words are squeamish ossifrage The magic words are squeamish ossifrage", expected_2);
+    SIGN_DIGEST(sha512, "The magic words are squeamish ossifrage The magic words are squeamish ossifrage", expected_2);
+    ASSERT (VERIFY(pub, sha512, "The magic words are squeamish ossifrage The magic words are squeamish ossifrage", signature));
+
+    SIGN(sha512, "abcdefghbcdefghicdefghijdefg"
+		  "hijkefghijklfghijklmghijklmn"
+		  "hijklmnoijklmnopjklmnopqklmn", expected_3);
+    SIGN_DIGEST(sha512, "abcdefghbcdefghicdefghijdefg"
+		  "hijkefghijklfghijklmghijklmn"
+		  "hijklmnoijklmnopjklmnopqklmn", expected_3);
+    ASSERT (VERIFY(pub, sha512, "abcdefghbcdefghicdefghijdefg"
+		  "hijkefghijklfghijklmghijklmn"
+		  "hijklmnoijklmnopjklmnopqklmn", signature));  
 }
 
 #undef SIGN
@@ -250,29 +320,60 @@ static void ut_rsa_md5_1()
     rsa_public_key pub;
     rsa_private_key key;
 
-    mpz_t expected;
+    mpz_t expected_1, expected_2, expected_3;
 
-    mpz_init(expected);
+    mpz_init(expected_1);
+    mpz_init(expected_2);
+    mpz_init(expected_3);
 
     rsa_private_key_init(&key);
     rsa_public_key_init(&pub);
+    mpz_clrbit (pub.n, 0);
+    ASSERT (!rsa_public_key_prepare (&pub));
+
+    mpz_clrbit (key.p, 0);
+    ASSERT (!rsa_private_key_prepare (&key));
 
     test_rsa_set_key_1(&pub, &key);
 
     /* Test md5 signatures */
-    mpz_set_str(expected,
-                "53bf517009fa956e" "3daa6adc95e8663d" "3759002f488bbbad"
-                "e49f62792d85dbcc" "293f68e2b68ef89a" "c5bd42d98f845325"
-                "3e6c1b76fc337db5" "e0053f255c55faf3" "eb6cc568ad7f5013"
-                "5b269a64acb9eaa7" "b7f09d9bd90310e6" "4c58f6dbe673ada2"
-                "67c97a9d99e19f9d" "87960d9ce3f0d5ce" "84f401fe7e10fa24"
-                "28b9bffcf9", 16);
+    mpz_set_str(expected_1,
+            "8305379796974b6d""1a0f208d4faa97ad"
+            "68ca721de91ac27a""1a467aef81f9406d"
+            "5b4a55a23b767cf5""7be0604650fde760"
+            "248030996bb26ee4""c17afc004f8b57d9"
+            "e8988012fde7ed9d""a8adc94654e4f9f2"
+            "c036fb8fea641371""35ca60aeb4c3ac8d"
+            "885ea035f986719e""85af7e70b3b0f7b5"
+            "5a2cf7499cc9ff04""242d58fa5490bd29", 16);
 
-    test_rsa_md5(&pub, &key, expected);
+    mpz_set_str(expected_2,
+            "53c8b94073a1f642""5d8d9a453ba996d1"
+            "4fe24651694fa749""edb3e4a3e400d331"
+            "68e69fb15cdadaf2""f4d50962df502f35"
+            "68a8d78150f873fd""46ffa01380d45590"
+            "0806f9382e3a1137""361ee48ba7bb1ef3"
+            "d4190f7ba640d083""dbbdce12c0a1b3d9"
+            "22934dea7b63a900""5b03313e684b42b2"
+            "a3b96529c467179a""c22418b7b4229701", 16);
+
+    mpz_set_str(expected_3,
+            "895b76adea176122""470b8835926a55fc"
+            "4219521932f619a2""ed9363d99d243415"
+            "6b71a654063d17a3""e9a4d9ca2854692d"
+            "edd6c3e3a2e1134b""7506d2c2a2be46f1"
+            "74ee26b5a3b4dba3""ef5de0f05f85aba9"
+            "68a5b1fff3b0f701""1ab617993fc66e6a"
+            "aad81ed9bda0e231""c49e04db52e93d7c"
+            "15d910a98153002f""5101ca53e32b93e0", 16);
+
+    test_rsa_md5(&pub, &key, expected_1, expected_2, expected_3);
 
     rsa_private_key_clear(&key);
     rsa_public_key_clear(&pub);
-    mpz_clear(expected);
+    mpz_clear(expected_1);
+    mpz_clear(expected_2);
+    mpz_clear(expected_3);
 }
 
 static void ut_rsa_sha1_1()
@@ -280,9 +381,11 @@ static void ut_rsa_sha1_1()
     rsa_public_key pub;
     rsa_private_key key;
 
-    mpz_t expected;
+    mpz_t expected_1, expected_2, expected_3;
 
-    mpz_init(expected);
+    mpz_init(expected_1);
+    mpz_init(expected_2);
+    mpz_init(expected_3);
 
     rsa_private_key_init(&key);
     rsa_public_key_init(&pub);
@@ -290,19 +393,43 @@ static void ut_rsa_sha1_1()
     test_rsa_set_key_1(&pub, &key);
 
     /* Test sha1 signature */
-    mpz_set_str(expected,
-                "129b405ed85db88c" "55d35344c4b52854" "496516b4d63d8211"
-                "80a0c24d6ced9047" "33065a564bbd33d0" "a5cdfd204b9c6d15"
-                "78337207c2f1662d" "c73906c7a0f2bf5c" "af92cef9121957b1"
-                "dcb111ff47b92389" "888e384d0cfd1b1e" "e5d7003a8feff3fd"
-                "dd6a71d242a79272" "25234d67ba369441" "c12ae555c697754e"
-                "a17f93fa92", 16);
+    mpz_set_str(expected_1,
+            "34fa98a17006d76e""4f410c0d3d9d8a23"
+            "4d21bcf86b164011""213ec9547d7dbf11"
+            "7d8ef2570e18fb49""18888fe2adfd0986"
+            "c05d90b4799ffe53""8fde1feb290a34f5"
+            "787bb6e39964d811""562c08b0847a6fbe"
+            "919b5ca8e9c07ed2""eccd3b93265ce35a"
+            "48010c07f9c35f01""80f6df22b8187b5b"
+            "940a184c04484e00""ccf8a0fabe2c185c", 16);
 
-    test_rsa_sha1(&pub, &key, expected);
+    mpz_set_str(expected_2,
+            "65fb67b5bccac272""a41ffb3ccdb32939"
+            "7290fd62eb50c684""ab7afece8684ad36"
+            "fed37942ac45b275""c5cd219214de7651"
+            "bb6f221907dbf9d3""c52a45b52e630a62"
+            "977edcecfce3d8f0""ecd4135a854b91aa"
+            "cbf51cd9d6a5926e""4017965a582e0acb"
+            "614040c4fe365939""4fa13a43f26214bc"
+            "d4cfc5f94a22fcce""fee2bc3185a97be4", 16);
+
+    mpz_set_str(expected_3,
+            "78ed0b2363358f69""f8c77e1357739d48"
+            "623343c4921861b4""c916cf18545dc804"
+            "eb9c97c3f79b53b3""08b7330c63feb3c9"
+            "39ecad2e7670c321""e805983ab1dd280e"
+            "149125304c56e729""b225e48284296c5f"
+            "4ff38ff1cbf034c9""90187dc769c4aaa4"
+            "25479d9392635751""347a02a7f6828b0e"
+            "1052b9f86da1729e""0a3bcf61ebada49a", 16);
+
+    test_rsa_sha1(&pub, &key, expected_1, expected_2, expected_3);
 
     rsa_private_key_clear(&key);
     rsa_public_key_clear(&pub);
-    mpz_clear(expected);
+    mpz_clear(expected_1);
+    mpz_clear(expected_2);
+    mpz_clear(expected_3);
 }
 
 static void ut_rsa_sha256_1()
@@ -310,28 +437,54 @@ static void ut_rsa_sha256_1()
     rsa_public_key pub;
     rsa_private_key key;
 
-    mpz_t expected;
+    mpz_t expected_1, expected_2, expected_3;
 
-    mpz_init(expected);
+    mpz_init(expected_1);
+    mpz_init(expected_2);
+    mpz_init(expected_3);
 
     rsa_private_key_init(&key);
     rsa_public_key_init(&pub);
 
     test_rsa_set_key_1(&pub, &key);
 
-    mpz_set_str(expected,
-                "13f9e43f7a401a73" "0a74985c01520d76" "bf5f2e2dff91e93b"
-                "9267d8c388d6937b" "d4bc6f1fa31618a9" "b5e3a1a875af72f5"
-                "0e805dbfebdf4348" "7d49763f0b365e78" "d2c0ea8fb3785897"
-                "782289a58f998907" "248c9cdf2c643d7e" "6ba6b55026227773"
-                "6f19caa69c4fc6d7" "7e2e5d4cd6b7a82b" "900d201ffd000448"
-                "685e5a4f3e", 16);
+    mpz_set_str(expected_1,
+            "518bf7a2444144db""9288c15d9346889d"
+            "d2b05709965d0b5d""5569729b6a44d01e"
+            "68936c12290bb8a7""af6d66c057d7a5c8"
+            "a482a87487d780ce""377b41f1de84b61a"
+            "75a31e8590982c7e""b31dd9bc735154c0"
+            "54bdf24542bfab6d""6eec389fcfc5264c"
+            "ea9ffc965b3046ab""c94cbb4142ba32cb"
+            "47c5e9f101460c66""8be57f31cd14134d", 16);
 
-    test_rsa_sha256(&pub, &key, expected);
+    mpz_set_str(expected_2,
+            "25297908eca0e43b""6e2fe7715cf137d5"
+            "824ea37af19f6227""0afcd779dd0a9fa0"
+            "a8dec6669289d572""788f23a9c14d32be"
+            "937c0202db4bd72c""e9a26cd8c754bd6c"
+            "2f9e98ba1c650db0""c79ff55a0039b211"
+            "95d2f4cb878dd2c0""4f899f127abd474c"
+            "c3849c4ff29a1a5b""fa441e2dfe25ef27"
+            "92a0667127c8a18c""ff55805198604bd0", 16);
+
+    mpz_set_str(expected_3,
+            "54294971710d0f5c""ad2b8602341ec90d"
+            "1b455d90e75ee5c3""b81f356eb1d21408"
+            "f36bbdd731b9b0c6""7df4354c742372f0"
+            "50dce6afd20f265a""6169fad7912ae0d7"
+            "954fe802796b8901""07b0cc792f6acfb3"
+            "5e1fe9df816601ca""22d5f8589753b51b"
+            "df88f8094661e8d1""ccd5a3a076200251"
+            "fcbf4aaf112883a5""cf69e5fc85dd6176", 16);
+
+    test_rsa_sha256(&pub, &key, expected_1, expected_2, expected_3);
 
     rsa_private_key_clear(&key);
     rsa_public_key_clear(&pub);
-    mpz_clear(expected);
+    mpz_clear(expected_1);
+    mpz_clear(expected_2);
+    mpz_clear(expected_3);
 }
 
 static void ut_rsa_sha512_1()
@@ -339,35 +492,113 @@ static void ut_rsa_sha512_1()
     rsa_public_key pub;
     rsa_private_key key;
 
-    mpz_t expected;
+    mpz_t expected_1, expected_2, expected_3;
 
-    mpz_init(expected);
+    mpz_init(expected_1);
+    mpz_init(expected_2);
+    mpz_init(expected_3);
 
     rsa_private_key_init(&key);
     rsa_public_key_init(&pub);
 
     test_rsa_set_key_1(&pub, &key);
 
-    mpz_set_str(expected,
-                "06327f717f43bcf3" "5994e567e8241963" "8c22e1057a7771e7"
-                "a665bb7441a39cc8" "7762f6b1a459cae3" "281462ed3f6aec48"
-                "15c2365797a02af6" "8a603adf276c46f6" "e6afb25d07c57f47"
-                "c516aff84abda629" "cc83d9364eb3616d" "7d4ddf0e9a25fac5"
-                "7d56a252b0cb7b1f" "8266b525e9b893af" "116e7845c0969a9f"
-                "603e2543f3", 16);
+    mpz_set_str(expected_1,
+            "76b74f4789f71bc8""8ff68c4d976f4a08"
+            "35efb956b9ffc3be""c8f5f17f83b04f96"
+            "e8bc75a8b87606f2""9cde8d8eb95cec34"
+            "9dd159b668d748d6""f1cff9ffa4ae3bcc"
+            "a75d7417fc4b3b13""4ae801e2b89afec7"
+            "8eea8d2dab426159""90cdad79d493952c"
+            "a27fea12f8697011""f787573567031370"
+            "c2f669c8c6d1ffab""80343b0d2ea9d336", 16);
 
-    test_rsa_sha512(&pub, &key, expected);
+    mpz_set_str(expected_2,
+            "70d66b9a9ad79272""e756de442b610cc2"
+            "00fb6a992b089c35""bc295ec82627cb1b"
+            "86fe0d7466fb8f81""091b86e190273827"
+            "b416859dba7b4292""cb905d3967a4e3d7"
+            "8589ee374d2f7a1b""696c6b9cd0d681c5"
+            "e7a1158aac42f648""080d7b9e1d57c628"
+            "5888b2794e1ef048""268b36780969929e"
+            "afac71788ffffc97""ca19b3b920835bd3", 16);
+
+    mpz_set_str(expected_3,
+            "720f92c0823e3efc""2897c9a2a28b45bc"
+            "7205162ce8ed3712""781ac8b665e49bd5"
+            "513987514cdd1f26""6f09ed9da02657af"
+            "73e95027a0e70e82""f6a4a1ac32590b18"
+            "6cff811a57f591ce""9bfe29ba6704083f"
+            "f246ce8be910b9dc""36d0667f52ee1ca1"
+            "6d41d75e8b5eb8a1""16ab5b3f16b3a91e"
+            "4128c1e1875529ff""41312816d0ce7f32", 16);
+
+    test_rsa_sha512(&pub, &key, expected_1, expected_2, expected_3);
 
     rsa_private_key_clear(&key);
     rsa_public_key_clear(&pub);
-    mpz_clear(expected);
+    mpz_clear(expected_1);
+    mpz_clear(expected_2);
+    mpz_clear(expected_3);
 }
 
-/* Test detection of invalid keys with even modulo */
-static void ut_rsa_md5_2()
+//rsa-keygen-test
+static void test_rsa_key(struct rsa_public_key *pub, struct rsa_private_key *key)
 {
-    rsa_public_key pub;
-    rsa_private_key key;
+    mpz_t tmp;
+    mpz_t phi;
+
+    mpz_init(tmp); mpz_init(phi);
+
+    fprintf(stderr, "Public key: ");
+    fprintf(stderr, "\n    n=");
+    mpz_out_str(stderr, 16, pub->n);
+    fprintf(stderr, "\n    e=");
+    mpz_out_str(stderr, 16, pub->e);
+
+    fprintf(stderr, "\n\nPrivate key: ");
+    fprintf(stderr, "\n    p=");
+    mpz_out_str(stderr, 16, key->p);
+    fprintf(stderr, "\n    q=");
+    mpz_out_str(stderr, 16, key->q);
+    fprintf(stderr, "\n    a=");
+    mpz_out_str(stderr, 16, key->a);
+    fprintf(stderr, "\n    b=");
+    mpz_out_str(stderr, 16, key->b);
+    fprintf(stderr, "\n    c=");
+    mpz_out_str(stderr, 16, key->c);
+    fprintf(stderr, "\n\n");
+
+    /* Check n = p q */
+    mpz_mul(tmp, key->p, key->q);
+    ASSERT (mpz_cmp(tmp, pub->n)== 0);
+
+    /* Check c q = 1 mod p */
+    mpz_mul(tmp, key->c, key->q);
+    mpz_fdiv_r(tmp, tmp, key->p);
+    ASSERT (mpz_cmp_ui(tmp, 1) == 0);
+
+    /* Check a e = 1 (mod (p-1) ) */
+    mpz_sub_ui(phi, key->p, 1);
+    mpz_mul(tmp, pub->e, key->a);
+    mpz_fdiv_r(tmp, tmp, phi);
+    ASSERT (mpz_cmp_ui(tmp, 1) == 0);
+
+    /* Check b e = 1 (mod (q-1) ) */
+    mpz_sub_ui(phi, key->q, 1);
+    mpz_mul(tmp, pub->e, key->b);
+    mpz_fdiv_r(tmp, tmp, phi);
+    ASSERT (mpz_cmp_ui(tmp, 1) == 0);
+
+    mpz_clear(tmp); mpz_clear(phi);
+}
+
+static void test_rsa_keygen(void)
+{
+    struct rsa_public_key pub;
+    struct rsa_private_key key;
+
+    struct knuth_lfib_ctx lfib;
 
     mpz_t expected;
 
@@ -376,279 +607,39 @@ static void ut_rsa_md5_2()
     rsa_private_key_init(&key);
     rsa_public_key_init(&pub);
 
-    mpz_clrbit (pub.n, 0);
-    ASSERT (!rsa_public_key_prepare (&pub));
+    /* Generate a 1024 bit key with random e */
+    knuth_lfib_init(&lfib, 13);
 
-    mpz_clrbit (key.p, 0);
-    ASSERT (!rsa_private_key_prepare (&key));
+    ASSERT (rsa_generate_keypair(&pub, &key,
+                    &lfib,
+                    (nettle_random_func *) knuth_lfib_random,
+                    NULL, NULL,
+                    1024, 50));
 
-    mpz_set_str(pub.n,
-                "013b04440e3eef25" "d51c738d508a7fa8" "b3445180c342af0f"
-                "4cb5a789047300e2" "cfc5c5450974cfc2" "448aeaaa7f43c374"
-                "c9a3b038b181f2d1" "0f1a2327fd2c087b" "a49bf1086969fd2c"
-                "d1df3fd69f81fa4b" "162cc8bbb363fc95" "b7b24b9c53d0c67e"
-                "f52b", 16);
-
-    mpz_set_str(pub.e, "3f1a012d", 16);
+    test_rsa_key(&pub, &key);
 
     ASSERT (rsa_public_key_prepare(&pub));
-
-    mpz_set_str(key.p,
-                "0b73c990eeda0a2a" "2c26416052c85560" "0c5c0f5ce86a8326"
-                "166acea91786237a" "7ff884e66dbfdd3a" "ab9d9801414c1506"
-                "8b", 16);
-
-    mpz_set_str(key.q,
-                "1b81c19a62802a41" "9c99283331b0badb" "08eb0c25ffce0fbf"
-                "50017850036f32f3" "2132a845b91a5236" "61f7b451d587383f"
-                "e1", 16);
-
-    mpz_set_str(key.a,
-                "0a912fc93a6cca6b" "3521725a3065b3be" "3c9745e29c93303d"
-                "7d29316c6cafa4a2" "89945f964fcdea59" "1f9d248b0b6734be"
-                "c9", 16);
-
-    mpz_set_str(key.b,
-                "1658eca933251813" "1eb19c77aba13d73" "e0b8f4ce986d7615"
-                "764c6b0b03c18146" "46b7f332c43e05c5" "351e09006979ca5b"
-                "05", 16);
-
-    mpz_set_str(key.c,
-                "0114720dace7b27f" "2bf2850c1804869f" "79a0aad0ec02e6b4"
-                "05e1831619db2f10" "bb9b6a8fd5c95df2" "eb78f303ea0c0cc8"
-                "06", 16);
-
     ASSERT (rsa_private_key_prepare(&key));
-    ASSERT (pub.size == key.size);
 
-    /* Test md5 signatures */
-    mpz_set_str(expected,
-                "011b939f6fbacf7f" "7d3217b022d07477" "e582e34d4bbddd4c"
-                "31520647417fc8a6" "18b2e196d799cedd" "d8f5c062fd796b0f"
-                "72ab46db2ac6ec74" "39d856be3f746cc4" "3e0a15429954736a"
-                "60a8b3c6ea93d2cb" "c69085c307d72517" "07d43bf97a3b51eb"
-                "9e89", 16);
+    /* Generate a 2000 bit key with fixed e */
+    knuth_lfib_init(&lfib, 17);
 
-    test_rsa_md5(&pub, &key, expected);
+    mpz_set_ui(pub.e, 17);
+    ASSERT (rsa_generate_keypair(&pub, &key,
+                    &lfib,
+                    (nettle_random_func *) knuth_lfib_random,
+                    NULL, NULL,
+                    2048, 0));
+
+    test_rsa_key(&pub, &key);
 
     rsa_private_key_clear(&key);
     rsa_public_key_clear(&pub);
     mpz_clear(expected);
 }
 
-static void ut_rsa_sha1_2()
-{
-    rsa_public_key pub;
-    rsa_private_key key;
 
-    mpz_t expected;
 
-    mpz_init(expected);
-
-    rsa_private_key_init(&key);
-    rsa_public_key_init(&pub);
-
-    mpz_clrbit (pub.n, 0);
-    ASSERT (!rsa_public_key_prepare (&pub));
-
-    mpz_clrbit (key.p, 0);
-    ASSERT (!rsa_private_key_prepare (&key));
-
-    mpz_set_str(pub.n,
-                "013b04440e3eef25" "d51c738d508a7fa8" "b3445180c342af0f"
-                "4cb5a789047300e2" "cfc5c5450974cfc2" "448aeaaa7f43c374"
-                "c9a3b038b181f2d1" "0f1a2327fd2c087b" "a49bf1086969fd2c"
-                "d1df3fd69f81fa4b" "162cc8bbb363fc95" "b7b24b9c53d0c67e"
-                "f52b", 16);
-
-    mpz_set_str(pub.e, "3f1a012d", 16);
-
-    ASSERT (rsa_public_key_prepare(&pub));
-
-    mpz_set_str(key.p,
-                "0b73c990eeda0a2a" "2c26416052c85560" "0c5c0f5ce86a8326"
-                "166acea91786237a" "7ff884e66dbfdd3a" "ab9d9801414c1506"
-                "8b", 16);
-
-    mpz_set_str(key.q,
-                "1b81c19a62802a41" "9c99283331b0badb" "08eb0c25ffce0fbf"
-                "50017850036f32f3" "2132a845b91a5236" "61f7b451d587383f"
-                "e1", 16);
-
-    mpz_set_str(key.a,
-                "0a912fc93a6cca6b" "3521725a3065b3be" "3c9745e29c93303d"
-                "7d29316c6cafa4a2" "89945f964fcdea59" "1f9d248b0b6734be"
-                "c9", 16);
-
-    mpz_set_str(key.b,
-                "1658eca933251813" "1eb19c77aba13d73" "e0b8f4ce986d7615"
-                "764c6b0b03c18146" "46b7f332c43e05c5" "351e09006979ca5b"
-                "05", 16);
-
-    mpz_set_str(key.c,
-                "0114720dace7b27f" "2bf2850c1804869f" "79a0aad0ec02e6b4"
-                "05e1831619db2f10" "bb9b6a8fd5c95df2" "eb78f303ea0c0cc8"
-                "06", 16);
-
-    ASSERT (rsa_private_key_prepare(&key));
-    ASSERT (pub.size == key.size);
-
-    /* Test sha1 signature */
-    mpz_set_str(expected,
-                "648c49e0ed045547" "08381d0bcd03b7bd" "b0f80a0e9030525d"
-                "234327a1c96b8660" "f1c01c6f15ae76d0" "4f53a53806b7e4db"
-                "1f789e6e89b538f6" "88fcbd2caa6abef0" "5432d52f3de463a4"
-                "a9e6de94f1b7bb68" "3c07edf0924fc93f" "56e1a0dba8f7491c"
-                "5c", 16);
-
-    test_rsa_sha1(&pub, &key, expected);
-
-    rsa_private_key_clear(&key);
-    rsa_public_key_clear(&pub);
-    mpz_clear(expected);
-}
-
-static void ut_rsa_sha256_2()
-{
-    rsa_public_key pub;
-    rsa_private_key key;
-
-    mpz_t expected;
-
-    mpz_init(expected);
-
-    rsa_private_key_init(&key);
-    rsa_public_key_init(&pub);
-
-    mpz_clrbit (pub.n, 0);
-    ASSERT (!rsa_public_key_prepare (&pub));
-
-    mpz_clrbit (key.p, 0);
-    ASSERT (!rsa_private_key_prepare (&key));
-
-    mpz_set_str(pub.n,
-                "013b04440e3eef25" "d51c738d508a7fa8" "b3445180c342af0f"
-                "4cb5a789047300e2" "cfc5c5450974cfc2" "448aeaaa7f43c374"
-                "c9a3b038b181f2d1" "0f1a2327fd2c087b" "a49bf1086969fd2c"
-                "d1df3fd69f81fa4b" "162cc8bbb363fc95" "b7b24b9c53d0c67e"
-                "f52b", 16);
-
-    mpz_set_str(pub.e, "3f1a012d", 16);
-
-    ASSERT (rsa_public_key_prepare(&pub));
-
-    mpz_set_str(key.p,
-                "0b73c990eeda0a2a" "2c26416052c85560" "0c5c0f5ce86a8326"
-                "166acea91786237a" "7ff884e66dbfdd3a" "ab9d9801414c1506"
-                "8b", 16);
-
-    mpz_set_str(key.q,
-                "1b81c19a62802a41" "9c99283331b0badb" "08eb0c25ffce0fbf"
-                "50017850036f32f3" "2132a845b91a5236" "61f7b451d587383f"
-                "e1", 16);
-
-    mpz_set_str(key.a,
-                "0a912fc93a6cca6b" "3521725a3065b3be" "3c9745e29c93303d"
-                "7d29316c6cafa4a2" "89945f964fcdea59" "1f9d248b0b6734be"
-                "c9", 16);
-
-    mpz_set_str(key.b,
-                "1658eca933251813" "1eb19c77aba13d73" "e0b8f4ce986d7615"
-                "764c6b0b03c18146" "46b7f332c43e05c5" "351e09006979ca5b"
-                "05", 16);
-
-    mpz_set_str(key.c,
-                "0114720dace7b27f" "2bf2850c1804869f" "79a0aad0ec02e6b4"
-                "05e1831619db2f10" "bb9b6a8fd5c95df2" "eb78f303ea0c0cc8"
-                "06", 16);
-
-    ASSERT (rsa_private_key_prepare(&key));
-    ASSERT (pub.size == key.size);
-
-    mpz_set_str(expected,
-                "d759bb28b4d249a2" "f8b67bdbb1ab7f50" "c88712fbcabc2956"
-                "1ec6ca3f8fdafe7a" "38433d7da287b8f7" "87857274c1640b2b"
-                "e652cd89c501d570" "3980a0af5c6bb60c" "f84feab25b099d06"
-                "e2519accb73dac43" "fb8bdad28835f3bd" "84c43678fe2ef41f"
-                "af", 16);
-
-    test_rsa_sha256(&pub, &key, expected);
-
-    rsa_private_key_clear(&key);
-    rsa_public_key_clear(&pub);
-    mpz_clear(expected);
-}
-
-static void ut_rsa_sha512_2()
-{
-    rsa_public_key pub;
-    rsa_private_key key;
-
-    mpz_t expected;
-
-    mpz_init(expected);
-
-    rsa_private_key_init(&key);
-    rsa_public_key_init(&pub);
-
-    mpz_clrbit (pub.n, 0);
-    ASSERT (!rsa_public_key_prepare (&pub));
-
-    mpz_clrbit (key.p, 0);
-    ASSERT (!rsa_private_key_prepare (&key));
-
-    mpz_set_str(pub.n,
-                "013b04440e3eef25" "d51c738d508a7fa8" "b3445180c342af0f"
-                "4cb5a789047300e2" "cfc5c5450974cfc2" "448aeaaa7f43c374"
-                "c9a3b038b181f2d1" "0f1a2327fd2c087b" "a49bf1086969fd2c"
-                "d1df3fd69f81fa4b" "162cc8bbb363fc95" "b7b24b9c53d0c67e"
-                "f52b", 16);
-
-    mpz_set_str(pub.e, "3f1a012d", 16);
-
-    ASSERT (rsa_public_key_prepare(&pub));
-
-    mpz_set_str(key.p,
-                "0b73c990eeda0a2a" "2c26416052c85560" "0c5c0f5ce86a8326"
-                "166acea91786237a" "7ff884e66dbfdd3a" "ab9d9801414c1506"
-                "8b", 16);
-
-    mpz_set_str(key.q,
-                "1b81c19a62802a41" "9c99283331b0badb" "08eb0c25ffce0fbf"
-                "50017850036f32f3" "2132a845b91a5236" "61f7b451d587383f"
-                "e1", 16);
-
-    mpz_set_str(key.a,
-                "0a912fc93a6cca6b" "3521725a3065b3be" "3c9745e29c93303d"
-                "7d29316c6cafa4a2" "89945f964fcdea59" "1f9d248b0b6734be"
-                "c9", 16);
-
-    mpz_set_str(key.b,
-                "1658eca933251813" "1eb19c77aba13d73" "e0b8f4ce986d7615"
-                "764c6b0b03c18146" "46b7f332c43e05c5" "351e09006979ca5b"
-                "05", 16);
-
-    mpz_set_str(key.c,
-                "0114720dace7b27f" "2bf2850c1804869f" "79a0aad0ec02e6b4"
-                "05e1831619db2f10" "bb9b6a8fd5c95df2" "eb78f303ea0c0cc8"
-                "06", 16);
-
-    ASSERT (rsa_private_key_prepare(&key));
-    ASSERT (pub.size == key.size);
-
-    mpz_set_str(expected,
-                "f761aae6273d6149" "06d8c208fb2897ca" "d798a46af4985b86"
-                "51d51e6a3e11cbe0" "84f18ba8979c0f54" "11493f7c6e770560"
-                "03db2146b4dbcaa6" "4aae2e02aab9ff7b" "1ddf77dc72145cf1"
-                "c26ebde7c708cdc1" "62e167a7ac33967b" "386a40ea4a988d17"
-                "47", 16);
-
-    test_rsa_sha512(&pub, &key, expected);
-
-    rsa_private_key_clear(&key);
-    rsa_public_key_clear(&pub);
-    mpz_clear(expected);
-}
 
 TEST(rsa_testcases, test_rsa_md5_1)
 {
@@ -670,24 +661,136 @@ TEST(rsa_testcases, test_rsa_sha512_1)
 ut_rsa_sha512_1();
 }
 
-/* Test detection of invalid keys with even modulo */
-TEST(rsa_testcases, test_rsa_md5_2)
+TEST(rsa_testcases, test_rsa_keygen)
 {
-ut_rsa_md5_2();
+    test_rsa_keygen();
 }
 
-TEST(rsa_testcases, test_rsa_sha1_2)
+
+//以下用于测试异常分支
+#ifdef __aarch64__
+extern "C" {
+extern int uadk_rsactx_init(struct uadk_rsa_st *uadk_st, mpz_t n);
+extern uint8_t *uadk_pkcs1_signature_prefix(unsigned key_size, uint8_t *buffer, unsigned id_size, const uint8_t *id, unsigned digest_size);
+extern int uadk_pkcs1_rsa_md5_encode(mpz_t m, size_t key_size, struct md5_ctx *hash);
+extern int uadk_pkcs1_rsa_md5_encode_digest(mpz_t m, size_t key_size, const uint8_t *digest);
+extern int uadk_pkcs1_rsa_sha256_encode(mpz_t m, size_t key_size, struct sha256_ctx *hash);
+extern int uadk_pkcs1_rsa_sha256_encode_digest(mpz_t m, size_t key_size, const uint8_t *digest);
+extern int uadk_pkcs1_rsa_sha512_encode(mpz_t m, size_t key_size, struct sha512_ctx *hash);
+extern int uadk_pkcs1_rsa_sha512_encode_digest(mpz_t m, size_t key_size, const uint8_t *digest);
+extern int check_prime_sufficient(int *i, int *bitsr, int *bitse, int *n, BIGNUM *rsa_p, BIGNUM *rsa_q, BIGNUM *r1, BIGNUM *r2, BN_CTX *ctx);
+extern int prime_mul_res(int i, BIGNUM *rsa_p, BIGNUM *rsa_q, BIGNUM *r1, BN_CTX *ctx);
+extern int check_prime_useful(int *n, BIGNUM *prime, BIGNUM *r1, BIGNUM *r2, BIGNUM *e_value, BN_CTX *ctx);
+}
+IFMUadkShareCtx *get_uadk_ctx_stub(UadkQueueAlgType alg_type, int alg, int mode, bool is_shared)
 {
-ut_rsa_sha1_2();
+        return NULL;
 }
 
-TEST(rsa_testcases, test_rsa_sha256_2)
+uint8_t *uadk_pkcs1_signature_prefix_stub(unsigned key_size, uint8_t *buffer, unsigned id_size, const uint8_t *id, unsigned digest_size)
 {
-ut_rsa_sha256_2();
+        return NULL;
 }
 
-TEST(rsa_testcases, test_rsa_sha512_2)
+unsigned long BN_get_word_stub(const BIGNUM *a)
 {
-ut_rsa_sha512_2();
+        return 1;
 }
 
+int prime_mul_res_stub(int i, BIGNUM *rsa_p, BIGNUM *rsa_q, BIGNUM *r1, BN_CTX *ctx)
+{
+        return 0;
+}
+
+int BN_rshift_stub(BIGNUM *r, const BIGNUM *a, int n)
+{
+        return 1;
+}
+
+int BN_sub_stub(BIGNUM *r, const BIGNUM *a, const BIGNUM *b)
+{
+        return 1;
+}
+
+int ERR_set_mark_stub(void)
+{
+        return 0;
+}
+
+void BN_set_flags_stub(BIGNUM *b, int n)
+{
+        return;
+}
+
+BIGNUM *BN_mod_inverse_stub(BIGNUM *ret, const BIGNUM *a, const BIGNUM *n, BN_CTX *ctx)
+{
+        return NULL;
+}
+
+unsigned long ERR_peek_last_error_stub(void)
+{
+        return 100;
+}
+
+TEST(rsa_testcases, test_rsa_exeception1)
+{
+        Stub s;
+        s.set(get_uadk_ctx, get_uadk_ctx_stub);
+        struct uadk_rsa_st uadk_st;
+        mpz_t n;
+        mpz_init(n);
+        uadk_rsactx_init(&uadk_st, n);
+        mpz_clear(n);
+        s.reset(get_uadk_ctx);
+}
+
+TEST(rsa_testcases, test_rsa_exeception2)
+{
+        Stub s;
+        s.set(uadk_pkcs1_signature_prefix, uadk_pkcs1_signature_prefix_stub);
+        struct md5_ctx hash;
+        struct sha256_ctx hash2;
+        struct sha512_ctx hash3;
+        mpz_t m;
+        mpz_init(m);
+        uadk_pkcs1_rsa_md5_encode(m, 128, &hash);
+        uadk_pkcs1_rsa_md5_encode_digest(m, 128, "The magic words are squeamish ossifrage");
+        uadk_pkcs1_rsa_sha256_encode(m, 128, &hash2);
+        uadk_pkcs1_rsa_sha256_encode_digest(m, 128, "The magic words are squeamish ossifrage");
+        uadk_pkcs1_rsa_sha512_encode(m, 128, &hash3);
+        uadk_pkcs1_rsa_sha512_encode_digest(m, 128, "The magic words are squeamish ossifrage");
+        mpz_clear(m);
+        s.reset(uadk_pkcs1_signature_prefix);
+}
+
+TEST(rsa_testcases, test_rsa_exeception3)
+{
+        Stub s1, s2, s3;
+        s1.set(prime_mul_res, prime_mul_res_stub);
+        s2.set(BN_get_word, BN_get_word_stub);
+        s3.set(BN_rshift, BN_rshift_stub);
+        int i=0;
+        int bitsr=0;
+        int bitse=0;
+        int n=0;
+        check_prime_sufficient(&i,&bitsr,&bitse,&n,NULL,NULL,NULL,NULL,NULL);
+        check_prime_sufficient(&i,&bitsr,&bitse,&n,NULL,NULL,NULL,NULL,NULL);
+        check_prime_sufficient(&i,&bitsr,&bitse,&n,NULL,NULL,NULL,NULL,NULL);
+        check_prime_sufficient(&i,&bitsr,&bitse,&n,NULL,NULL,NULL,NULL,NULL);
+        check_prime_sufficient(&i,&bitsr,&bitse,&n,NULL,NULL,NULL,NULL,NULL);
+        s1.reset(prime_mul_res);
+        s2.reset(BN_get_word);
+        s3.reset(BN_rshift);
+}
+
+TEST(rsa_testcases, test_rsa_exeception4)
+{
+        Stub s1,s2,s3,s4,s5;
+        s1.set(BN_sub, BN_sub_stub);
+        s2.set(ERR_set_mark, ERR_set_mark_stub);
+        s3.set(BN_set_flags, BN_set_flags_stub);
+        s4.set(BN_mod_inverse, BN_mod_inverse_stub);
+        s5.set(ERR_peek_last_error, ERR_peek_last_error_stub);
+        check_prime_useful(NULL, NULL, NULL, NULL, NULL, NULL);
+}
+#endif

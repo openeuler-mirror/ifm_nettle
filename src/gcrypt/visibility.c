@@ -85,7 +85,7 @@ gpg_error_t ifm_gcry_cipher_setctr(gcry_uadk_aes_hd_t hd, const void *ctr, size_
     return gcry_cipher_setctr(hd->gcry_hd_t, ctr, ctrlen);
 }
 
-gcry_error_t ifm_gcry_md_open(gcry_uadk_sha2_hd_t *h, int algo, unsigned int flags)
+gcry_error_t ifm_gcry_md_open(gcry_uadk_md_hd_t *h, int algo, unsigned int flags)
 {
     return gcry_uadk_md_open(h, algo, flags);
 }
@@ -96,7 +96,7 @@ gcry_error_t ifm_gcry_md_algo_info(int algo, int what, void *buffer, size_t *nby
     // 该代码用于测试验证是否调用适配层的接口。
 }
 
-gcry_error_t ifm_gcry_md_setkey(gcry_uadk_sha2_hd_t hd, const void *key, size_t keylen) {
+gcry_error_t ifm_gcry_md_setkey(gcry_uadk_md_hd_t hd, const void *key, size_t keylen) {
     return gcry_uadk_md_setkey(hd, key, keylen);
 }
 
@@ -171,22 +171,22 @@ gcry_error_t ifm_gcry_pubkey_get_sexp(gcry_sexp_t *r_sexp, int mode, gcry_ctx_t 
     return gcry_pubkey_get_sexp(r_sexp, mode, ctx);
 }
 
-gcry_error_t ifm_gcry_md_enable(gcry_uadk_sha2_hd_t hd, int algo)
+gcry_error_t ifm_gcry_md_enable(gcry_uadk_md_hd_t hd, int algo)
 {
     return gcry_uadk_md_enable(hd, algo);
 }
 
-void ifm_gcry_md_write(gcry_uadk_sha2_hd_t hd, const void *buffer, size_t length)
+void ifm_gcry_md_write(gcry_uadk_md_hd_t hd, const void *buffer, size_t length)
 {
     gcry_uadk_md_write(hd, buffer, length);
 }
 
-unsigned char *ifm_gcry_md_read(gcry_uadk_sha2_hd_t hd, int algo)
+unsigned char *ifm_gcry_md_read(gcry_uadk_md_hd_t hd, int algo)
 {
     return gcry_uadk_md_read(hd, algo);
 }
 
-void ifm_gcry_md_close(gcry_uadk_sha2_hd_t hd)
+void ifm_gcry_md_close(gcry_uadk_md_hd_t hd)
 {
     gcry_uadk_md_close(hd);
 }
@@ -197,11 +197,11 @@ void ifm_gcry_md_hash_buffer(int algo, void *digest,
     gcry_md_hash_buffer(algo, digest, buffer, length);
 }
 
-gcry_err_code_t ifm_gcry_md_copy(gcry_uadk_sha2_hd_t *dst, gcry_uadk_sha2_hd_t src)
+gcry_err_code_t ifm_gcry_md_copy(gcry_uadk_md_hd_t *dst, gcry_uadk_md_hd_t src)
 {
     return gcry_uadk_md_copy(dst, src);
 }
 
-void ifm_gcry_md_reset(gcry_uadk_sha2_hd_t hd) {
+void ifm_gcry_md_reset(gcry_uadk_md_hd_t hd) {
     gcry_uadk_md_reset(hd);
 }

@@ -25,8 +25,8 @@
 
 #include "ifm_gcrypt.h"
 #include "test_gcrypt_h/stopwatch.h"
-#define gcry_md_handle gcry_uadk_sha2_hd
-#define gcry_md_hd_t gcry_uadk_sha2_hd_t
+#define gcry_md_handle gcry_uadk_md_hd
+#define gcry_md_hd_t gcry_uadk_md_hd_t
 #define gcry_cipher_handle gcry_uadk_aes_hd
 #define gcry_cipher_hd_t gcry_uadk_aes_hd_t
 
@@ -1085,22 +1085,22 @@ uadk_cipher_bench(const char *algoname) {
             {GCRY_CIPHER_MODE_ECB,      "   ECB/Stream", 1, 0xffffffffU},
             {GCRY_CIPHER_MODE_CBC,      " CBC/Poly1305", 1, 0xffffffffU,
                     NULL, 16,                          16, 16},
-            {GCRY_CIPHER_MODE_CFB,      "      CFB",     0, 0xffffffffU,
-                    NULL, 16,                          16, 16},
-            {GCRY_CIPHER_MODE_OFB,      "      OFB",     0, 0xffffffffU,
-                    NULL, 16,                          16, 16},
-            {GCRY_CIPHER_MODE_CTR,      "      CTR",     0, 0xffffffffU,
-                    NULL, 16,                          16, 16},
-            {GCRY_CIPHER_MODE_XTS,      "      XTS",     0, 16 << 20,
-                    NULL,          GCRY_XTS_BLOCK_LEN, 0,  0, 1},
-            {GCRY_CIPHER_MODE_CCM,      "      CCM",     0, 0xffffffffU,
-                    ccm_aead_init, GCRY_CCM_BLOCK_LEN, 8,},
-            {GCRY_CIPHER_MODE_GCM,      "      GCM",     0, 0xffffffffU,
-                    NULL,          GCRY_GCM_BLOCK_LEN, GCRY_GCM_BLOCK_LEN},
-            {GCRY_CIPHER_MODE_OCB,      "      OCB",     1, 0xffffffffU,
-                    NULL, 16,                          16, 15},
-            {GCRY_CIPHER_MODE_EAX,      "      EAX",     0, 0xffffffffU,
-                    NULL, 0,                           8,  8},
+            // {GCRY_CIPHER_MODE_CFB,      "      CFB",     0, 0xffffffffU,
+            //         NULL, 16,                          16, 16},
+            // {GCRY_CIPHER_MODE_OFB,      "      OFB",     0, 0xffffffffU,
+            //         NULL, 16,                          16, 16},
+            // {GCRY_CIPHER_MODE_CTR,      "      CTR",     0, 0xffffffffU,
+            //         NULL, 16,                          16, 16},
+            // {GCRY_CIPHER_MODE_XTS,      "      XTS",     0, 16 << 20,
+            //         NULL,          GCRY_XTS_BLOCK_LEN, 0,  0, 1},
+            // {GCRY_CIPHER_MODE_CCM,      "      CCM",     0, 0xffffffffU,
+            //         ccm_aead_init, GCRY_CCM_BLOCK_LEN, 8,},
+            // {GCRY_CIPHER_MODE_GCM,      "      GCM",     0, 0xffffffffU,
+            //         NULL,          GCRY_GCM_BLOCK_LEN, GCRY_GCM_BLOCK_LEN},
+            // {GCRY_CIPHER_MODE_OCB,      "      OCB",     1, 0xffffffffU,
+            //         NULL, 16,                          16, 15},
+            // {GCRY_CIPHER_MODE_EAX,      "      EAX",     0, 0xffffffffU,
+            //         NULL, 0,                           8,  8},
             {0}
     };
     int modeidx;
@@ -1115,8 +1115,8 @@ uadk_cipher_bench(const char *algoname) {
 
     //256B、512B、1KB、10KB、512KB、1MB
     int times = 1000;
-    int test_data_size[7] = {256, 512, 1024, 1024 * 10, 1024 * 512, 1024 * 1024 * 1 , 1024 * 1024 * 16 };
-    printf("%s %d %s", "algo\t|\t\t\t\t256B(encrypt)\t256B(decrypt)\t\t\t512B(encrypt)\t512B(decrypt)\t\t\t1KB(encrypt)\t1KB(decrypt)\t\t\t10KB(encrypt)\t10KB(decrypt)\t\t\t512KB(encrypt)\t512KB(decrypt)\t\t\t1MB(encrypt)\t1MB(decrypt)\t\t\t16MB(encrypt)\t16MB(decrypt)|\t\twrite", times, "times");
+    int test_data_size[6] = {512, 1024, 1024 * 10, 1024 * 512, 1024 * 1024 * 1 , 1024 * 1024 * 10 };
+    printf("%s %d %s", "algo\t|\t512B(en)\t512B(decrypt)\t1KB(en)\t1KB(de)\t10KB(en)\t10KB(de)\t512KB(en)\t512KB(de)\t1MB(en)\t1MB(de)\t10MB(en)\t10MB(de)|\twrite", times, "times");
     putchar('\n');
     algo = gcry_cipher_map_name(algoname);
     if (!algo) {
@@ -1145,29 +1145,30 @@ uadk_cipher_bench(const char *algoname) {
     fflush(stdout);
     for (modeidx = 0; modes[modeidx].mode; modeidx++) {
         if(modes[modeidx].mode == GCRY_CIPHER_MODE_ECB) {
-            printf("%s,(ECB/Stream)\t\t", algoname);
+            printf("%s,(ECB)\t", algoname);
         } else if(modes[modeidx].mode == GCRY_CIPHER_MODE_CBC){
-            printf("%s,(CBC/Poly1305)\t\t", algoname);
+            printf("%s,(CBC)\t", algoname);
         } else if(modes[modeidx].mode == GCRY_CIPHER_MODE_CFB){
-            printf("%s,(CFB)\t\t\t\t", algoname);
+            printf("%s,(CFB)\t\t\t", algoname);
         } else if(modes[modeidx].mode == GCRY_CIPHER_MODE_OFB){
-            printf("%s,(OFB)\t\t\t\t", algoname);
+            printf("%s,(OFB)\t\t\t", algoname);
         } else if(modes[modeidx].mode == GCRY_CIPHER_MODE_CTR){
-            printf("%s,(CTR)\t\t\t\t", algoname);
+            printf("%s,(CTR)\t\t\t", algoname);
         } else if(modes[modeidx].mode == GCRY_CIPHER_MODE_XTS){
-            printf("%s,(XTS)\t\t\t\t", algoname);
+            printf("%s,(XTS)\t\t\t", algoname);
         } else if(modes[modeidx].mode == GCRY_CIPHER_MODE_CCM){
-            printf("%s,(CCM)\t\t\t\t", algoname);
+            printf("%s,(CCM)\t\t\t", algoname);
         } else if(modes[modeidx].mode == GCRY_CIPHER_MODE_GCM){
-            printf("%s,(GCM)\t\t\t\t", algoname);
+            printf("%s,(GCM)\t\t\t", algoname);
         } else if(modes[modeidx].mode == GCRY_CIPHER_MODE_OCB){
-            printf("%s,(OCB)\t\t\t\t", algoname);
+            printf("%s,(OCB)\t\t\t", algoname);
         } else if(modes[modeidx].mode == GCRY_CIPHER_MODE_EAX){
-            printf("%s,(EAX)\t\t\t\t", algoname);
+            printf("%s,(EAX)\t\t\t", algoname);
         }
         for (int temp = 0; temp < sizeof(test_data_size) / sizeof(int); temp++) {
-            float n_byte = test_data_size[temp] / 1024.0 * times;
             allocated_buflen = test_data_size[temp];
+            times = 10 * 1024 * 1024 / allocated_buflen;
+            times = (times < 100) ? 100 : (times > 1000) ? 1000 : times;
             raw_buf = gcry_xcalloc(allocated_buflen + 15, 1);
             buf = (raw_buf
                    + ((16 - ((size_t) raw_buf & 0x0f)) % buffer_alignment));
@@ -1252,7 +1253,8 @@ uadk_cipher_bench(const char *algoname) {
             gettimeofday(&cur_tval, NULL);
             time_used = (cur_tval.tv_sec - start_tval.tv_sec) * 1000000 +
                         cur_tval.tv_usec - start_tval.tv_usec;
-            printf("%.2f Mb/s\t\t", n_byte / time_used * 1000000.0 / 1024.0);
+            float n_byte = test_data_size[temp] / 1024.0 * times;
+            printf("%.2f Mb/s\t", n_byte / time_used * 1000000.0 / 1024.0);
             fflush(stdout);
             gcry_cipher_close(hd);
             if (err) {
@@ -1325,7 +1327,7 @@ uadk_cipher_bench(const char *algoname) {
             gettimeofday(&cur_tval, NULL);
             time_used = (cur_tval.tv_sec - start_tval.tv_sec) * 1000000 +
                         cur_tval.tv_usec - start_tval.tv_usec;
-            printf("%.2f Mb/s\t\t\t\t", n_byte / time_used * 1000000.0 / 1024.0);
+            printf("%.2f Mb/s\t", n_byte / time_used * 1000000.0 / 1024.0);
             fflush(stdout);
             gcry_cipher_close(hd);
             if (err) {
@@ -1947,7 +1949,6 @@ uadk_md_bench(const char *algoname) {
     putchar('\n');
     printf("%-12s", gcry_md_algo_name(algo));
     for (int temp = 0; temp < sizeof(test_data_size) / sizeof(int); temp++) {
-        float n_byte = test_data_size[temp] / 1024.0 * times;
         struct timeval start_tval;
         gettimeofday(&start_tval, NULL);
         bufsize = test_data_size[temp];
@@ -1956,6 +1957,8 @@ uadk_md_bench(const char *algoname) {
             fprintf(stderr, PGM ": memory allocate failed! `%s'\n", algoname);
             exit(1);
         }
+        times = 10 * 1024 * 1024 / bufsize;
+        times = (times < 100) ? 100 : (times > 1000) ? 1000 : times;
         buf = buf_base + ((16 - ((size_t) buf_base & 0x0f)) % buffer_alignment);
 
         for (i = 0; i < bufsize; i++)
@@ -1969,6 +1972,7 @@ uadk_md_bench(const char *algoname) {
         gettimeofday(&cur_tval, NULL);
         time_used = (cur_tval.tv_sec - start_tval.tv_sec) * 1000000 +
                     cur_tval.tv_usec - start_tval.tv_usec;
+        float n_byte = test_data_size[temp] / 1024.0 * times;
         printf("%.2f Mb/s\t", n_byte / time_used * 1000000.0 / 1024.0);
         fflush(stdout);
         free(buf_base);
@@ -2163,27 +2167,29 @@ main(int argc, char **argv) {
 
     if (!argc) {
         xgcry_control ((GCRYCTL_ENABLE_QUICK_RANDOM, 0));
-        uadk_cipher_bench("AES");
-        uadk_cipher_bench("AES192");
-        uadk_cipher_bench("AES256");
+        // uadk_cipher_bench("AES");
+        // uadk_cipher_bench("AES192");
+        // uadk_cipher_bench("AES256");
+        uadk_cipher_bench("SM4");
         uadk_md_bench("SHA224");
         uadk_md_bench("SHA256");
         uadk_md_bench("SHA384");
         uadk_md_bench("SHA512");
-        md_bench(NULL);
-        putchar('\n');
-        mac_bench(NULL);
-        putchar('\n');
-        cipher_bench(NULL);
-        putchar('\n');
-        rsa_bench(pk_count, 1, no_blinding);
-        elg_bench(pk_count, 0);
-        dsa_bench(pk_count, 0);
-        ecc_bench(pk_count, 0);
-        putchar('\n');
-        mpi_bench();
-        putchar('\n');
-        random_bench(0);
+        uadk_md_bench("SM3");
+        // md_bench(NULL);
+        // putchar('\n');
+        // mac_bench(NULL);
+        // putchar('\n');
+        // cipher_bench(NULL);
+        // putchar('\n');
+        // rsa_bench(pk_count, 1, no_blinding);
+        // elg_bench(pk_count, 0);
+        // dsa_bench(pk_count, 0);
+        // ecc_bench(pk_count, 0);
+        // putchar('\n');
+        // mpi_bench();
+        // putchar('\n');
+        // random_bench(0);
     } else if (!strcmp(*argv, "random") || !strcmp(*argv, "strongrandom")) {
         if (argc == 1)
             random_bench((**argv == 's'));

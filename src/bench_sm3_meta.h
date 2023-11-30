@@ -1,9 +1,10 @@
 /******************************************************************************
+ * bench_sm3_meta.h: sm3_meta for bench
  *
  * Copyright (c) Huawei Technologies Co., Ltd. 2020. All rights reserved.
  *
  * Authors:
- * huangduirong <huangduirong@huawei.com>
+ * chen-yufanspace <1109674186@qq.com>
  *
  * This library is free software; you can redistribute it and/or
  * modify it under the terms of the GNU Lesser General Public
@@ -19,30 +20,13 @@
  * License along with this library; if not, write to the Free Software
  * Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA  02110-1301  USA
  ********************************************************************************/
-#ifndef IFM_NETTLE_SM3_H_INCLUDED
-#define IFM_NETTLE_SM3_H_INCLUDED
-#include <stddef.h>
-#include <stdint.h>
+
+#ifndef BENCH_SM3_META_H
+#define BENCH_SM3_META_H
+#include <nettle/nettle-meta.h>
 #include "sm3_meta.h"
-#ifdef __cplusplus
-extern "C" {
+#include "sm3.h"
+
+const struct nettle_hash nettle_ifm_sm3 = _NETTLE_HASH(ifm_sm3, SM3);
+
 #endif
-
-#define sm3_init ifm_sm3_init
-#define sm3_update ifm_sm3_update
-#define sm3_digest ifm_sm3_digest
-
-#define SM3_DIGEST_SIZE 32
-#define SM3_BLOCK_SIZE 64
-
-void ifm_sm3_init(struct ifm_sm3_ctx *ctx);
-
-void ifm_sm3_update(struct ifm_sm3_ctx *ctx, size_t length, const uint8_t *data);
-
-void ifm_sm3_digest(struct ifm_sm3_ctx *ctx, size_t length, uint8_t *digest);
-
-#ifdef __cplusplus
-}
-#endif
-
-#endif /* IFM_NETTLE_SM3_H_INCLUDED */

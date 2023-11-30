@@ -5,6 +5,7 @@
  *
  * Authors:
  * jiaji2023 <jiaji@isrc.iscas.ac.cn>
+ * chen-yufanspace <1109674186@qq.com>
  *
  * This library is free software; you can redistribute it and/or
  * modify it under the terms of the GNU Lesser General Public
@@ -23,9 +24,15 @@
 #ifndef IFM_NETTLE_RSA_META_INCLUDED
 #define IFM_NETTLE_RSA_META_INCLUDED
 
+#include <gmp.h>
 #include <stddef.h>
 #include <stdint.h>
-#include <gmp.h>
+
+#ifdef __aarch64__
+#include "uadk/v1/wd_bmm.h"
+#include "uadk/v1/wd_rsa.h"
+#include "uadk_meta.h"
+#endif
 
 #ifdef __cplusplus
 extern "C" {
@@ -41,6 +48,11 @@ struct ifm_rsa_public_key {
 
     /* Public exponent */
     mpz_t e;
+
+#ifdef __aarch64__
+    struct uadk_rsa_st uadk_st;
+    bool use_uadk;
+#endif
 };
 
 struct ifm_rsa_private_key {
@@ -51,7 +63,8 @@ struct ifm_rsa_private_key {
     mpz_t d;
 
     /* The two factors */
-    mpz_t p; mpz_t q;
+    mpz_t p;
+    mpz_t q;
 
     /* d % (p-1), i.e. a e = 1 (mod (p-1)) */
     mpz_t a;
@@ -61,6 +74,11 @@ struct ifm_rsa_private_key {
 
     /* modular inverse of q , i.e. c q = 1 (mod p) */
     mpz_t c;
+
+#ifdef __aarch64__
+    struct uadk_rsa_st uadk_st;
+    bool use_uadk;
+#endif
 };
 
 #ifdef __cplusplus
@@ -68,4 +86,3 @@ struct ifm_rsa_private_key {
 #endif
 
 #endif // IFM_NETTLE_RSA_META_INCLUDED
-

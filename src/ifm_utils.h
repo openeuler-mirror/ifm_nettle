@@ -42,7 +42,7 @@ extern "C" {
 #endif
 
 // 算法类型数量，当前支持哈希以及对称加密，后续需支持非对称加密
-#define UADK_ALG_SIZE    3
+#define UADK_ALG_SIZE    4
 
 #ifdef __aarch64__
 
@@ -50,7 +50,8 @@ extern "C" {
 typedef enum {
     IFM_UADK_ALG_DIGEST = 0,
     IFM_UADK_ALG_CIPHER,
-    IFM_UADK_ALG_AEAD
+    IFM_UADK_ALG_AEAD,
+    IFM_UADK_ALG_RSA
 } UadkQueueAlgType;
 
 typedef struct ifm_uadk_alg_mode {
