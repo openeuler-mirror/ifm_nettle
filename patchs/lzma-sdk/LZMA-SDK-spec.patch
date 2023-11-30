@@ -1,0 +1,191 @@
+From bc7bcacedf2f71a14a5c29ab59006bfb5eece4f5 Mon Sep 17 00:00:00 2001
+From: huangduirong <huangduirong@huawei.com>
+Date: Wed, 29 Nov 2023 17:07:56 +0800
+Subject: [PATCH] LZMA-SDK spec
+
+---
+ LZMA-SDK.spec | 131 ++++++++++++++++++++++++++++++--------------------
+ 1 file changed, 79 insertions(+), 52 deletions(-)
+
+diff --git a/LZMA-SDK.spec b/LZMA-SDK.spec
+index 1cae3f1..f926bc3 100644
+--- a/LZMA-SDK.spec
++++ b/LZMA-SDK.spec
+@@ -1,91 +1,117 @@
++%global ver_maj 22
++%global ver_min 00
++%global ver_rel 0
++%global debug_package %{nil}
++
+ 
+ Name:           LZMA-SDK
+ Version:        22.00
+-Release:        2
++Release:        3
+ Summary:        SDK for lzma compression
+ License:        Public Domain
+ URL:            http://sourceforge.net/projects/sevenzip/
+ Source0:        https://sourceforge.net/projects/sevenzip/files/LZMA%20SDK/lzma2200.7z
+-BuildRequires:  gcc-c++ p7zip
+-%description
+-The LZMA SDK provides the documentation, samples, header files, libraries, and
+-tools you need to develop applications that use LZMA compression.
+-
+-LZMA is default and general compression methods of 7z format in the 7-Zip program.
+-LZMA provides a high compression ratio and fast decompression, so it is very
+-suitable for embedded applications.
+-
+-%package doc
+-Summary:        The help file of %{name}
+-Requires:       %{name}%{?_isa} = %{version}-%{release}
+ 
+-%description doc
+-The help file of %{name}.
++Patch6001:      build-the-7lzma-lib.patch
+ 
++BuildRequires:  dos2unix
++BuildRequires: make
++BuildRequires:  gcc-c++
++BuildRequires:  p7zip
++ 
++%description
++LZMA SDK provides the documentation, samples, header files, libraries,
++and tools you need to develop applications that use LZMA compression.
++ 
++LZMA is default and general compression method of 7z format
++in 7-Zip compression program (www.7-zip.org). LZMA provides high
++compression ratio and very fast decompression.
++ 
++LZMA is an improved version of famous LZ77 compression algorithm. 
++It was improved in way of maximum increasing of compression ratio,
++keeping high decompression speed and low memory requirements for
++decompressing.
++ 
+ %package devel
+-Summary:        Development headers for %{name}
++Summary:        Development libraries and headers for %{name}
+ Requires:       %{name}%{?_isa} = %{version}-%{release}
+  
+ %description devel
+-Development headers for %{name}.
++Development libraries and headers for %{name}.
+  
+ %prep
+-%setup -q -c -n lzma2200
+-%define debug_package %{nil} 
+-
+-for f in .c .cpp .cs .dsp .dsw .h .java .txt makefile; do
++%autosetup -p1 -c -n lzma-sdk
++rm -rv bin
++ 
++for f in .h .c .cpp .dsw .dsp .java .cs .txt makefile; do
+    find . -iname "*$f" | xargs chmod -x
+ done
+  
+-# correct end-of-file encoding for txt files in the DOC.
+-sed -i 's/\r//' DOC/*.txt 
++# correct end-of-line encoding
++find . -type f -name '*.txt' | xargs dos2unix -k
+  
+-# The following files in lzma belong to the iso-8859-1 character set.
+-# They are currently converted to utf-8 character set type.
+-for FILE in \
++for i in \
+ DOC/7zC.txt \
+ DOC/7zFormat.txt \
+-DOC/lzma.txt \
++DOC/installer.txt \
+ DOC/lzma-history.txt \
++DOC/lzma-sdk.txt \
++DOC/lzma-specification.txt \
++DOC/lzma.txt \
+ DOC/Methods.txt \
+-C/Util/7z/makefile.gcc \
+-C/Util/Lzma/makefile.gcc \
+-C/Util/LzmaLib/LzmaLib.def \
+-C/Util/LzmaLib/resource.rc \
+-CPP/Build.mak \
+-CPP/7zip/MyVersionInfo.rc \
+-CPP/7zip/Archive/Archive.def \
+-CPP/7zip/Archive/Archive2.def \
++CS/7zip/Compress/LzmaAlone/LzmaAlone.sln \
+ CPP/7zip/Bundles/Alone7z/resource.rc \
++CPP/7zip/Bundles/LzmaCon/makefile.gcc \
++CPP/Build.mak \
++C/Util/Lzma/makefile.gcc \
+ CPP/7zip/Bundles/Format7zR/resource.rc \
++C/Util/7z/makefile.gcc \
++CPP/7zip/Archive/Archive.def \
+ CPP/7zip/Bundles/Format7zExtractR/resource.rc \
+-CS/7zip/Compress/LzmaAlone/LzmaAlone.sln \
+-CPP/7zip/Bundles/LzmaCon/makefile.gcc; do
+-    iconv -f iso-8859-1 -t utf-8 $FILE > $FILE.utf8
+-    touch -r $FILE $FILE.utf8
+-    mv $FILE.utf8 $FILE
++C/Util/LzmaLib/resource.rc \
++CPP/7zip/Archive/Archive2.def \
++CPP/7zip/MyVersionInfo.rc \
++DOC/Methods.txt \
++C/Util/LzmaLib/LzmaLib.def; do
++    iconv -f iso-8859-1 -t utf-8 $i > $i.utf8
++    touch -r $i $i.utf8
++    mv $i.utf8 $i
+ done
+  
+ %build
+-make -f makefile.gcc clean all CXX="g++ %{optflags} -fPIC" CXX_C="gcc %{optflags} -fPIC" LDFLAGS="%{?__global_ldflags}" -C CPP/7zip/Bundles/LzmaCon
++#pushd CPP/7zip/Bundles/LzmaCon
++#make -f makefile.gcc clean
++#make -f makefile.gcc all CXXFLAGS_EXTRA="%{build_cxxflags}" CFLAGS_WARN="%{build_cflags}" LDFLAGS_STATIC_2="%{build_cxxflags}"
++pushd C/Util/Lzma
++make -f makefile.gcc clean
++make -f makefile.gcc all
++popd
+  
+ %install
+-rm -rf %{buildroot}
+-mkdir -p %{buildroot}%{_bindir}
+-install -m 0755 CPP/7zip/Bundles/LzmaCon/_o/lzma %{buildroot}%{_bindir}
+-mkdir -p %{buildroot}/%{_includedir}/lzma/
+-find -iname '*.h' | xargs -I {} install -m 0755 -D {} %{buildroot}/%{_includedir}/lzma/{}
+-
++install -dm0755 %{buildroot}%{_libdir}
++install -pm0755 C/Util/Lzma/_o/lib7lzma.so %{buildroot}%{_libdir}
++pushd %{buildroot}%{_libdir}
++#ln -s lib7lzma.so.%{ver_maj}.%{ver_min} lib7lzma.so.%{ver_maj}
++#ln -s lib7lzma.so.%{ver_maj}.%{ver_min} lib7lzma.so
++popd
++install -dm0755 %{buildroot}/%{_includedir}/lzma
++find -iname '*.h' | xargs -I {} install -m0644 -D {} %{buildroot}/%{_includedir}/lzma-sdk/{}
++#contains only Windows related headers so for fedora useless
++rm -rv %{buildroot}/usr/include/lzma-sdk/CPP/Windows
++ 
+ %files
+-%{_bindir}/*
++#%doc DOC/lzma.txt DOC/lzma-history.txt
++%{_libdir}/lib7lzma.so
+  
+ %files devel
+-%{_includedir}/lzma/
+-
+-%files doc
+-%doc DOC/7z*.txt DOC/Methods.txt DOC/lzma.txt DOC/lzma-history.txt
++#%doc DOC/7z*.txt DOC/Methods.txt DOC/installer.txt DOC/lzma-sdk.txt DOC/lzma-specification.txt
++%{_includedir}/lzma-sdk/
++%{_libdir}/lib7lzma.so
+ 
+ %changelog
++* Wed Nov 29 2023 huangduirong <huangduirong@huawei.com> - 22.00-3
++- support to compile to 7lzma lib
++
+ * Wed Aug 03 2022 tanjinghui1 <tanjinghui1@huawei.com> - 22.00-2
+ - change header file path lzma2200 to lzma
+ 
+@@ -97,3 +123,4 @@ find -iname '*.h' | xargs -I {} install -m 0755 -D {} %{buildroot}/%{_includedir
+ 
+ * Fri Dec 4 2020 tangmeng5 <tangmeng5@huawei.com> - 19.00-1
+ - package init
++
+-- 
+2.33.0
+

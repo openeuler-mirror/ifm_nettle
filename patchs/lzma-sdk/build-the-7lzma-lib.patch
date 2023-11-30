@@ -1,0 +1,31 @@
+From e5e22f18f233d163ff2d490fd494be66dd103534 Mon Sep 17 00:00:00 2001
+From: huangduirong <huangduirong@huawei.com>
+Date: Wed, 29 Nov 2023 16:49:46 +0800
+Subject: [PATCH] build the 7lzma lib
+
+---
+ C/Util/Lzma/makefile.gcc | 4 +++-
+ 1 file changed, 3 insertions(+), 1 deletion(-)
+
+diff --git a/C/Util/Lzma/makefile.gcc b/C/Util/Lzma/makefile.gcc
+index 6ce77a0..43a4e5f 100644
+--- a/C/Util/Lzma/makefile.gcc
++++ b/C/Util/Lzma/makefile.gcc
+@@ -1,4 +1,4 @@
+-PROG = 7lzma
++PROG = lib7lzma
+ 
+ include ../../../CPP/7zip/LzmaDec_gcc.mak
+ 
+@@ -16,6 +16,8 @@ OBJS = \
+   $O/LzmaEnc.o \
+   $O/LzmaUtil.o \
+   $O/Threads.o \
++  $O/LzmaLib.o \
+ 
++DEF_FILE = LzmaLib.def
+ 
+ include ../../7zip_gcc_c.mak
+-- 
+2.33.0
+
