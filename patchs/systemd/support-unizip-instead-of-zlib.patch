@@ -1,0 +1,108 @@
+From a9441b093211a70b94a45a613cbab05dce39f68e Mon Sep 17 00:00:00 2001
+From: tannnxin <njutanx@163.com>
+Date: Thu, 30 Nov 2023 15:45:16 +0800
+Subject: [PATCH] support unizip
+
+---
+ meson.build                  | 12 +++++++++---
+ src/import/import-compress.h |  3 ++-
+ src/import/meson.build       |  3 ++-
+ src/import/qcow2-util.c      |  5 +++--
+ 4 files changed, 16 insertions(+), 7 deletions(-)
+
+diff --git a/meson.build b/meson.build
+index e5ceb1e..c75cf3a 100644
+--- a/meson.build
++++ b/meson.build
+@@ -1084,6 +1084,9 @@ else
+ endif
+ conf.set10('HAVE_ELFUTILS', have)
+ 
++libunizip = meson.get_compiler('c').find_library('unizip')
++conf.set10('HAVE_UNIZIP', libunizip.found())
++
+ want_zlib = get_option('zlib')
+ if want_zlib != 'false' and not skip_deps
+         libz = dependency('zlib',
+@@ -2145,7 +2148,8 @@ if conf.get('ENABLE_IMPORTD') == 1
+                                                   libz,
+                                                   libbzip2,
+                                                   libxz,
+-                                                  libgcrypt],
++                                                  libgcrypt,
++                                                  libunizip],
+                                   install_rpath : rootlibexecdir,
+                                   install : true,
+                                   install_dir : rootlibexecdir)
+@@ -2157,7 +2161,8 @@ if conf.get('ENABLE_IMPORTD') == 1
+                                     dependencies : [libcurl,
+                                                     libz,
+                                                     libbzip2,
+-                                                    libxz],
++                                                    libxz,
++                                                    libunizip],
+                                     install_rpath : rootlibexecdir,
+                                     install : true,
+                                     install_dir : rootlibexecdir)
+@@ -2177,7 +2182,8 @@ if conf.get('ENABLE_IMPORTD') == 1
+                                     dependencies : [libcurl,
+                                                     libz,
+                                                     libbzip2,
+-                                                    libxz],
++                                                    libxz,
++                                                    libunizip],
+                                     install_rpath : rootlibexecdir,
+                                     install : true,
+                                     install_dir : rootlibexecdir)
+diff --git a/src/import/import-compress.h b/src/import/import-compress.h
+index 859bd0e..49a92bb 100644
+--- a/src/import/import-compress.h
++++ b/src/import/import-compress.h
+@@ -6,7 +6,8 @@
+ #endif
+ #include <lzma.h>
+ #include <sys/types.h>
+-#include <zlib.h>
++#include "unizip_adapt.h"
++#define z_stream unizip_stream
+ 
+ #include "macro.h"
+ 
+diff --git a/src/import/meson.build b/src/import/meson.build
+index 1c15fd8..218d126 100644
+--- a/src/import/meson.build
++++ b/src/import/meson.build
+@@ -74,6 +74,7 @@ tests += [
+           'src/import/qcow2-util.c',
+           'src/import/qcow2-util.h'],
+          [libshared],
+-         [libz],
++         [libz,
++         libunizip],
+          'HAVE_ZLIB', 'manual'],
+ ]
+diff --git a/src/import/qcow2-util.c b/src/import/qcow2-util.c
+index e927b60..e42c40f 100644
+--- a/src/import/qcow2-util.c
++++ b/src/import/qcow2-util.c
+@@ -1,6 +1,7 @@
+ /* SPDX-License-Identifier: LGPL-2.1+ */
+ 
+-#include <zlib.h>
++#include "unizip_adapt.h"
++#define z_stream unizip_stream
+ 
+ #include "alloc-util.h"
+ #include "btrfs-util.h"
+@@ -98,7 +99,7 @@ static int decompress_cluster(
+                 void *buffer2) {
+ 
+         _cleanup_free_ void *large_buffer = NULL;
+-        z_stream s = {};
++        z_stream s;
+         uint64_t sz;
+         ssize_t l;
+         int r;
+-- 
+2.27.0
+
