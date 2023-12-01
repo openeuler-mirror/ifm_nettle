@@ -1,0 +1,44 @@
+From 9c29f30ee71bb31c292f1bf9fbfb234bc21076fe Mon Sep 17 00:00:00 2001
+From: tannnxin <njutanx@163.com>
+Date: Fri, 1 Dec 2023 10:54:34 +0800
+Subject: [PATCH] ifm-systemd-spec
+
+---
+ systemd.spec | 7 ++++++-
+ 1 file changed, 6 insertions(+), 1 deletion(-)
+
+diff --git a/systemd.spec b/systemd.spec
+index bfbb03a..516df71 100644
+--- a/systemd.spec
++++ b/systemd.spec
+@@ -16,7 +16,7 @@
+ Name:           systemd
+ Url:            https://www.freedesktop.org/wiki/Software/systemd
+ Version:        243
+-Release:        61
++Release:        62
+ License:        MIT and LGPLv2+ and GPLv2+
+ Summary:        System and Service Manager
+ 
+@@ -200,6 +200,8 @@ Patch0150:      backport-pid1-fix-segv-triggered-by-status-query.patch
+ Patch0151:      backport-main-log-which-process-send-SIGNAL-to-PID1.patch
+ Patch0152:      backport-main-drop-get_process_cmdline-from-crash-handler.patch
+ 
++Patch9001:      support-unizip-instead-of-zlib.patch
++
+ #openEuler
+ Patch9002:      1509-fix-journal-file-descriptors-leak-problems.patch
+ Patch9003:      1602-activation-service-must-be-restarted-when-reactivated.patch
+@@ -1704,6 +1706,9 @@ fi
+ %exclude /usr/share/man/man3/*
+ 
+ %changelog
++* Fri Dec 1 2023 geziwen <hugin1_1@sina.com> - 243-62
++- support unizip to substitude zlib
++
+ * Sun Apr 23 2023 hongjinghao <hongjinghao@huawei.com> - 243-61
+ - sync community patches
+ 
+-- 
+2.27.0
+
