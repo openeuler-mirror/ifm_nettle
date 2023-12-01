@@ -1,0 +1,121 @@
+From 967aefea3132a690e9ab1cc5091207dc48d13f32 Mon Sep 17 00:00:00 2001
+From: tannnxin <njutanx@163.com>
+Date: Thu, 30 Nov 2023 12:22:07 +0800
+Subject: [PATCH] support unizip instead of zlib
+
+---
+ configure.ac              | 19 ++++++++++++++++++-
+ lib/content_encoding.c    |  5 +++++
+ lib/version.c             |  4 ++++
+ packages/OS400/os400sys.c |  4 ++++
+ src/tool_hugehelp.c       |  4 ++++
+ 5 files changed, 35 insertions(+), 1 deletion(-)
+
+diff --git a/configure.ac b/configure.ac
+index 152b047..1f5eba9 100644
+--- a/configure.ac
++++ b/configure.ac
+@@ -1279,11 +1279,28 @@ dnl set variable for use in automakefile(s)
+ AM_CONDITIONAL(HAVE_LIBZ, test x"$AMFIXLIB" = x1)
+ AC_SUBST(ZLIB_LIBS)
+ 
++AC_ARG_WITH([unizip],
++    [AS_HELP_STRING([--with-unizip], [Enable UNIZIP support (default is no)])],
++    [use_unizip="$withval"],
++    [use_unizip="no"])
++
++if test "x$use_unizip" = "xyes"; then
++    AC_MSG_WARN([UNIZIP support is enabled.])
++    PKG_CHECK_MODULES([UNIZIP], [unizip],
++        [LIBS="-lunizip $LIBS"
++        AC_DEFINE([USE_UNIZIP], [1], [Define if UNIZIP support is enabled])],],
++        [
++        AC_MSG_ERROR([Could not find UNIZIP library])
++        ])
++fi
++
++
++
+ dnl **********************************************************************
+ dnl Check for the presence of BROTLI decoder libraries and headers
+ dnl **********************************************************************
+ 
+-dnl Brotli project home page: https://github.com/google/brotli
++dnl Brotli prject home page: https://github.com/google/brotli
+ 
+ dnl Default to compiler & linker defaults for BROTLI files & libraries.
+ OPT_BROTLI=off
+diff --git a/lib/content_encoding.c b/lib/content_encoding.c
+index a84ff54..f51457b 100644
+--- a/lib/content_encoding.c
++++ b/lib/content_encoding.c
+@@ -26,9 +26,14 @@
+ #include <curl/curl.h>
+ #include <stddef.h>
+ 
++
++#ifndef USE_UNIZIP
+ #ifdef HAVE_ZLIB_H
+ #include <zlib.h>
+ #endif
++#else
++#include "unizip_adapt.h"
++#endif
+ 
+ #ifdef HAVE_BROTLI
+ #include <brotli/decode.h>
+diff --git a/lib/version.c b/lib/version.c
+index c84ef85..0076fc4 100644
+--- a/lib/version.c
++++ b/lib/version.c
+@@ -54,9 +54,13 @@
+ #include <librtmp/rtmp.h>
+ #endif
+ 
++#ifndef USE_UNIZIP
+ #ifdef HAVE_ZLIB_H
+ #include <zlib.h>
+ #endif
++#else
++#include "unizip_adapt.h"
++#endif
+ 
+ #ifdef HAVE_BROTLI
+ #include <brotli/decode.h>
+diff --git a/packages/OS400/os400sys.c b/packages/OS400/os400sys.c
+index ec06c95..2777530 100644
+--- a/packages/OS400/os400sys.c
++++ b/packages/OS400/os400sys.c
+@@ -38,9 +38,13 @@
+ #include <qadrt.h>
+ #include <errno.h>
+ 
++#ifndef USE_UNIZIP
+ #ifdef HAVE_ZLIB_H
+ #include <zlib.h>
+ #endif
++#else
++#include "unizip_adapt.h"
++#endif
+ 
+ #ifdef USE_GSKIT
+ #include <gskssl.h>
+diff --git a/src/tool_hugehelp.c b/src/tool_hugehelp.c
+index 1aacfb4..fda6afb 100644
+--- a/src/tool_hugehelp.c
++++ b/src/tool_hugehelp.c
+@@ -5833,7 +5833,11 @@ void hugehelp(void) {}
+  */
+ #ifdef USE_MANUAL
+ #include "tool_hugehelp.h"
++#ifndef USE_UNIZIP
+ #include <zlib.h>
++#else
++#include "unizip_adapt.h"
++#endif
+ #include "memdebug.h" /* keep this as LAST include */
+ static const unsigned char hugehelpgz[] = {
+   /* This mumbo-jumbo is the huge help text compressed with gzip.
+-- 
+2.27.0
+
