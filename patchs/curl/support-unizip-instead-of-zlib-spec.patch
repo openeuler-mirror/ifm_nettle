@@ -1,14 +1,14 @@
-From 06394b22911fdf9972db2046e96f4fe2178b8821 Mon Sep 17 00:00:00 2001
+From 754dd3551c752f0052980b5152a1c4db9d6e3642 Mon Sep 17 00:00:00 2001
 From: tannnxin <njutanx@163.com>
-Date: Fri, 1 Dec 2023 10:12:31 +0800
+Date: Fri, 1 Dec 2023 12:25:14 +0800
 Subject: [PATCH] support unizip instead of zlib
 
 ---
- curl.spec | 9 ++++++---
- 1 file changed, 6 insertions(+), 3 deletions(-)
+ curl.spec | 8 ++++++--
+ 1 file changed, 6 insertions(+), 2 deletions(-)
 
 diff --git a/curl.spec b/curl.spec
-index a32e8db..4d886ff 100644
+index 6ca5ffd..b432b8e 100644
 --- a/curl.spec
 +++ b/curl.spec
 @@ -6,7 +6,7 @@
@@ -20,16 +20,15 @@ index a32e8db..4d886ff 100644
  Summary:        Curl is used in command lines or scripts to transfer data
  License:        MIT
  URL:            https://curl.haxx.se/
-@@ -75,7 +75,7 @@ Patch61:        backport-hostcheck-fix-host-name-wildcard-checking.patch
+@@ -75,6 +75,7 @@ Patch61:        backport-hostcheck-fix-host-name-wildcard-checking.patch
  Patch62:        backport-CVE-2023-32001.patch
  Patch63:	backport-CVE-2023-38545.patch
  Patch64:	backport-CVE-2023-38546.patch
--
 +Patch65:	support-unizip-instead-of-zlib.patch
  
  BuildRequires:  automake brotli-devel coreutils gcc groff krb5-devel
  BuildRequires:  libidn2-devel libnghttp2-devel libpsl-devel
-@@ -151,7 +151,7 @@ export common_configure_opts="--cache-file=../config.cache \
+@@ -150,7 +151,7 @@ export common_configure_opts="--cache-file=../config.cache \
          --enable-ldap \
          --enable-ldaps \
          --enable-manual \
@@ -38,12 +37,12 @@ index a32e8db..4d886ff 100644
          --with-libidn2 \
          --with-libpsl \
          --with-libssh
-@@ -244,6 +244,9 @@ rm -rf ${RPM_BUILD_ROOT}%{_libdir}/libcurl.la
+@@ -243,6 +244,9 @@ rm -rf ${RPM_BUILD_ROOT}%{_libdir}/libcurl.la
  %{_mandir}/man3/*
  
  %changelog
 +* Fri Dec 1 2023 Xin Tan <njutanx@163.com> - 7.79.1-25
-+- supprot unizip instead of zlib
++- support unizip instead of zlib
 +
  * Wed Oct 11 2023 Funda Wang <fundawang@yeah.net> - 7.79.1-24
  - Type:CVE

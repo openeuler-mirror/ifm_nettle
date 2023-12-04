@@ -1,7 +1,7 @@
 #!/bin/sh
 
 # 下载源码
-rm curl-rf
+rm curl -rf
 git clone -b openEuler-22.03-LTS-SP1 https://gitee.com/src-openeuler/curl.git
 
 # 切换到对应commit
