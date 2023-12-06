@@ -341,13 +341,13 @@ verto_ev *ifm_verto_add_io(verto_ctx *ctx, verto_ev_flag flags,
     }
 
     if (fd < 0 || !(flags & (VERTO_EV_FLAG_IO_READ | VERTO_EV_FLAG_IO_WRITE))) {
-        IFM_ERR("fd is invalid. must be read or write.");
+        IFM_ERR("fd is invalid. It must be read or write.");
         return NULL;
     }
 
     ev = libhv_make_ev(ctx, flags, callback, VERTO_EV_TYPE_IO);
     if (!ev) {
-        IFM_ERR("libhv_make_ev failed.!");
+        IFM_ERR("libhv_make_ev failed !");
         return NULL;
     }
 
@@ -355,14 +355,14 @@ verto_ev *ifm_verto_add_io(verto_ctx *ctx, verto_ev_flag flags,
     // add hio
     hvEvent = malloc(sizeof(hevent2verto_t));
     if (!hvEvent) {
-        IFM_ERR("malloc hvEvent failed.!");
+        IFM_ERR("malloc hvEvent failed !");
         free_ev(ev);
         return NULL;
     }
     memset(hvEvent, 0, sizeof(hevent2verto_t));
     hvEvent->io = hio_get((hloop_t *)ctx->ctx, ev->option.io.fd);
     if(NULL == hvEvent->io){
-        IFM_ERR("hio_get failed.!");
+        IFM_ERR("hio_get failed !");
         free_ev(ev);
         return NULL;
     }
@@ -372,7 +372,7 @@ verto_ev *ifm_verto_add_io(verto_ctx *ctx, verto_ev_flag flags,
         event = HV_WRITE;
     }
     if (0 != hio_add(hvEvent->io, (hio_cb)libhv_callback_io, event)) {
-        IFM_ERR("hio_add failed.!");
+        IFM_ERR("hio_add failed !");
         free_ev(ev);
         return NULL;
     }
@@ -412,7 +412,7 @@ verto_ev *ifm_verto_add_timeout(verto_ctx *ctx, verto_ev_flag flags,
 
     ev = libhv_make_ev(ctx, flags, callback, VERTO_EV_TYPE_TIMEOUT);
     if (!ev) {
-        IFM_ERR("ifm_verto_add_timeout libhv_make_ev failed.!");
+        IFM_ERR("ifm_verto_add_timeout libhv_make_ev failed !");
         return NULL;
     }
 
@@ -420,14 +420,14 @@ verto_ev *ifm_verto_add_timeout(verto_ctx *ctx, verto_ev_flag flags,
     // add htimer
     hvEvent = malloc(sizeof(hevent2verto_t));
     if (!hvEvent) {
-        IFM_ERR("ifm_verto_add_timeout malloc hvEvent failed.!");
+        IFM_ERR("ifm_verto_add_timeout malloc hvEvent failed !");
         free_ev(ev);
         return NULL;
     }
     memset(hvEvent, 0, sizeof(hevent2verto_t));
     hvEvent->timer = htimer_add((hloop_t *)ctx->ctx, (htimer_cb)libhv_callback_timer, interval, INFINITE);
     if (NULL != hvEvent->timer) {
-        IFM_ERR("htimer_add failed.!");
+        IFM_ERR("htimer_add failed !");
         free_ev(ev);
         return NULL;
     }
