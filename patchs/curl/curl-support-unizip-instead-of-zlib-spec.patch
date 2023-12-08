@@ -1,0 +1,53 @@
+From 00ffbb40749ca3f4ae96fcda1cc331a59b6c9303 Mon Sep 17 00:00:00 2001
+From: SimonShin <1847401037@qq.com>
+Date: Fri, 8 Dec 2023 17:55:47 +0800
+Subject: [PATCH] curl support unizip instead of zlib spec
+
+---
+ curl.spec | 9 +++++++--
+ 1 file changed, 7 insertions(+), 2 deletions(-)
+
+diff --git a/curl.spec b/curl.spec
+index 0ce8985..62f9ce9 100644
+--- a/curl.spec
++++ b/curl.spec
+@@ -6,7 +6,7 @@
+ 
+ Name:           curl
+ Version:        7.79.1
+-Release:        25
++Release:        26
+ Summary:        Curl is used in command lines or scripts to transfer data
+ License:        MIT
+ URL:            https://curl.haxx.se/
+@@ -78,6 +78,7 @@ Patch64:	backport-CVE-2023-38546.patch
+ Patch65:        backport-CVE-2023-46218.patch
+ Patch66:        backport-0001-CVE-2023-46219.patch
+ Patch67:        backport-0002-CVE-2023-46219.patch
++Patch68:        support-unizip-instead-of-zlib.patch
+ 
+ BuildRequires:  automake brotli-devel coreutils gcc groff krb5-devel
+ BuildRequires:  libidn2-devel libnghttp2-devel libpsl-devel
+@@ -156,7 +157,8 @@ export common_configure_opts="--cache-file=../config.cache \
+         --with-brotli \
+         --with-libidn2 \
+         --with-libpsl \
+-        --with-libssh
++        --with-libssh \
++        --with-unizip
+ )
+ 
+ sed -e 's/^runpath_var=.*/runpath_var=/' \
+@@ -246,6 +248,9 @@ rm -rf ${RPM_BUILD_ROOT}%{_libdir}/libcurl.la
+ %{_mandir}/man3/*
+ 
+ %changelog
++* Fri Dec 08 2023 tanxin <njutanx@163.com> - 7.79.1-26
++- DESC:support unizip instead of zlib
++
+ * Fri Dec 08 2023 zhouyihang <zhouyihang3@h-partners.com> - 7.79.1-25
+ - Type:CVE
+ - CVE:CVE-2023-46218 CVE-2023-46219
+-- 
+2.27.0
+
