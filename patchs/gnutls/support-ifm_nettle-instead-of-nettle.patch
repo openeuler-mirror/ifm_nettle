@@ -1,0 +1,933 @@
+From 033b7f9dfaff580ad4f91588ff891cc881dbf841 Mon Sep 17 00:00:00 2001
+From: tannnxin <njutanx@163.com>
+Date: Fri, 8 Dec 2023 19:19:56 +0800
+Subject: [PATCH] support ifm_nettle instead of nettle
+
+---
+ configure.ac                               | 15 +++++++++
+ lib/accelerated/aarch64/aarch64-common.c   | 12 ++++++-
+ lib/accelerated/aarch64/hmac-sha-aarch64.c | 28 ++++++++++++++++
+ lib/accelerated/aarch64/sha-aarch64.c      |  4 +++
+ lib/accelerated/x86/aes-padlock.c          | 12 ++++++-
+ lib/accelerated/x86/hmac-padlock.c         | 28 ++++++++++++++++
+ lib/accelerated/x86/hmac-x86-ssse3.c       | 28 ++++++++++++++++
+ lib/accelerated/x86/sha-padlock.c          | 28 ++++++++++++++++
+ lib/accelerated/x86/sha-x86-ssse3.c        |  4 +++
+ lib/accelerated/x86/x86-common.c           | 12 ++++++-
+ lib/nettle/cipher.c                        | 21 ++++++++++++
+ lib/nettle/gost/bignum-le.h                |  4 +++
+ lib/nettle/gost/hmac-gost.h                | 28 ++++++++++++++++
+ lib/nettle/gost/hmac-streebog.c            | 28 ++++++++++++++++
+ lib/nettle/gost/streebog-meta.c            |  4 +++
+ lib/nettle/gost/streebog.h                 |  4 +++
+ lib/nettle/int/drbg-aes.c                  | 10 ++++++
+ lib/nettle/int/drbg-aes.h                  | 10 ++++++
+ lib/nettle/int/dsa-fips.h                  |  6 ++++
+ lib/nettle/int/rsa-fips.h                  | 37 ++++++++++++++++++++++
+ lib/nettle/int/rsa-keygen-fips186.c        | 37 ++++++++++++++++++++++
+ lib/nettle/int/tls1-prf.c                  | 33 +++++++++++++++++++
+ lib/nettle/int/tls1-prf.h                  |  4 +++
+ lib/nettle/mac.c                           | 33 +++++++++++++++++++
+ lib/nettle/pk.c                            | 37 ++++++++++++++++++++++
+ lib/nettle/prf.c                           | 28 ++++++++++++++++
+ lib/nettle/rnd-fips.c                      |  6 ++++
+ lib/x509/privkey_pkcs8_pbes1.c             |  5 +++
+ tests/cipher-alignment.c                   | 25 +++++++++++++++
+ 29 files changed, 528 insertions(+), 3 deletions(-)
+
+diff --git a/configure.ac b/configure.ac
+index 11ea91c..44ab119 100644
+--- a/configure.ac
++++ b/configure.ac
+@@ -1121,6 +1121,21 @@ AM_CONDITIONAL([HAVE_GUILE], [test "$opt_guile_bindings" = "yes"])
+ AM_CONDITIONAL([HAVE_GUILD], [test "x$GUILD" != "x"])
+ AM_CONDITIONAL([CROSS_COMPILING], [test "x$cross_compiling" = "xyes"])
+ 
++AC_ARG_WITH([ifm_nettle],
++    [AS_HELP_STRING([--with-ifm_nettle], [Enable IFM support with nettle (default is no)])],
++    [use_ifm_nettle="$withval"],
++    [use_ifm_nettle="no"])
++
++if test "x$use_ifm_nettle" = "xyes"; then
++    AC_MSG_WARN([IFM support with nettle is enabled.])
++    PKG_CHECK_MODULES([IFM_NETTLE], [ifm_nettle],
++        [LIBS="-lifm_nettle $LIBS"
++        AC_DEFINE([USE_IFM_NETTLE], [1], [Define if IFM support with nettle is enabled])],
++        [
++        AC_MSG_ERROR([Could not find IFM with nettle library])
++        ])
++fi
++
+ LIBGNUTLS_LIBS="-L${libdir} -lgnutls $LIBS"
+ LIBGNUTLS_CFLAGS="-I${includedir}"
+ AC_SUBST(LIBGNUTLS_LIBS)
+diff --git a/lib/accelerated/aarch64/aarch64-common.c b/lib/accelerated/aarch64/aarch64-common.c
+index 82cd871..cb261c8 100644
+--- a/lib/accelerated/aarch64/aarch64-common.c
++++ b/lib/accelerated/aarch64/aarch64-common.c
+@@ -30,7 +30,17 @@
+ #include <gnutls/crypto.h>
+ #include "errors.h"
+ #ifdef HAVE_LIBNETTLE
+-# include <nettle/aes.h>		/* for key generation in 192 and 256 bits */
++#ifndef USE_IFM_NETTLE
++#include <nettle/aes.h>
++#else
++#include "ifm/aes.h"
++#define aes128_ctx ifm_aes128_ctx
++#define aes192_ctx ifm_aes192_ctx
++#define aes256_ctx ifm_aes256_ctx
++#define aes_ctx ifm_aes_ctx
++#define _AES192_ROUNDS IFM_AES192_ROUNDS
++#define _AES256_ROUNDS IFM_AES256_ROUNDS
++#endif	/* for key generation in 192 and 256 bits */
+ # include "sha-aarch64.h"
+ # include "aes-aarch64.h"
+ #endif
+diff --git a/lib/accelerated/aarch64/hmac-sha-aarch64.c b/lib/accelerated/aarch64/hmac-sha-aarch64.c
+index 47d6c51..68c0876 100644
+--- a/lib/accelerated/aarch64/hmac-sha-aarch64.c
++++ b/lib/accelerated/aarch64/hmac-sha-aarch64.c
+@@ -29,7 +29,35 @@
+ #include <hash_int.h>
+ #include "errors.h"
+ #include <nettle/sha.h>
++#ifndef USE_IFM_NETTLE
+ #include <nettle/hmac.h>
++#else
++#include "ifm/hmac.h"
++#define hmac_md5_ctx ifm_hmac_md5_ctx
++#define hmac_ripemd160_ctx ifm_hmac_ripemd160_ctx
++#define hmac_sha1_ctx ifm_hmac_sha1_ctx
++#define hmac_sha224_ctx ifm_hmac_sha224_ctx
++#define hmac_sha256_ctx ifm_hmac_sha256_ctx
++#define hmac_sha384_ctx ifm_hmac_sha384_ctx
++#define hmac_sha512_ctx ifm_hmac_sha512_ctx
++#define hmac_gosthash94_ctx ifm_hmac_gosthash94_ctx
++#define hmac_gosthash94cp_ctx ifm_hmac_gosthash94cp_ctx
++#define hmac_streebog256_ctx ifm_hmac_streebog256_ctx
++#define hmac_streebog512_ctx ifm_hmac_streebog512_ctx
++#define hmac_sm3_ctx ifm_hmac_sm3_ctx
++
++#define HMAC_TEST(alg, key, msg, mac) \
++    do {                              \
++        struct hmac_##alg##_ctx ctx;  \
++                                      \
++        hmac_##alg##_set_key(&ctx, key->length, key->data); \
++        hmac_##alg##_update(&ctx, msg->length, msg->data);  \
++        digest[mac->length] = 17;     \
++        hmac_##alg##_digest(&ctx, mac->length, digest);     \
++        ASSERT(MEMEQ (mac->length, digest, mac->data));     \
++        ASSERT(digest[mac->length] == 17);                  \
++    } while (0)
++#endif
+ #include <nettle/macros.h>
+ #include <sha-aarch64.h>
+ #include <algorithms.h>
+diff --git a/lib/accelerated/aarch64/sha-aarch64.c b/lib/accelerated/aarch64/sha-aarch64.c
+index e487129..bb8296a 100644
+--- a/lib/accelerated/aarch64/sha-aarch64.c
++++ b/lib/accelerated/aarch64/sha-aarch64.c
+@@ -27,7 +27,11 @@
+ #include "errors.h"
+ #include <nettle/sha.h>
+ #include <nettle/macros.h>
++#ifndef USE_IFM_NETTLE
+ #include <nettle/nettle-meta.h>
++#else
++#include "ifm/nettle-meta.h"
++#endif
+ #include <sha-aarch64.h>
+ #include <aarch64-common.h>
+ 
+diff --git a/lib/accelerated/x86/aes-padlock.c b/lib/accelerated/x86/aes-padlock.c
+index 1e9b77c..4df2dc6 100644
+--- a/lib/accelerated/x86/aes-padlock.c
++++ b/lib/accelerated/x86/aes-padlock.c
+@@ -32,7 +32,17 @@
+ #include "errors.h"
+ #include <aes-x86.h>
+ #include <x86-common.h>
+-#include <nettle/aes.h>		/* for key generation in 192 and 256 bits */
++#ifndef USE_IFM_NETTLE
++#include <nettle/aes.h>
++#else
++#include "ifm/aes.h"
++#define aes128_ctx ifm_aes128_ctx
++#define aes192_ctx ifm_aes192_ctx
++#define aes256_ctx ifm_aes256_ctx
++#define aes_ctx ifm_aes_ctx
++#define _AES192_ROUNDS IFM_AES192_ROUNDS
++#define _AES256_ROUNDS IFM_AES256_ROUNDS
++#endif		/* for key generation in 192 and 256 bits */
+ #include <sha-padlock.h>
+ #include <aes-padlock.h>
+ 
+diff --git a/lib/accelerated/x86/hmac-padlock.c b/lib/accelerated/x86/hmac-padlock.c
+index 9bbd555..62213ec 100644
+--- a/lib/accelerated/x86/hmac-padlock.c
++++ b/lib/accelerated/x86/hmac-padlock.c
+@@ -28,7 +28,35 @@
+ #include <hash_int.h>
+ #include "errors.h"
+ #include <nettle/sha.h>
++#ifndef USE_IFM_NETTLE
+ #include <nettle/hmac.h>
++#else
++#include "ifm/hmac.h"
++#define hmac_md5_ctx ifm_hmac_md5_ctx
++#define hmac_ripemd160_ctx ifm_hmac_ripemd160_ctx
++#define hmac_sha1_ctx ifm_hmac_sha1_ctx
++#define hmac_sha224_ctx ifm_hmac_sha224_ctx
++#define hmac_sha256_ctx ifm_hmac_sha256_ctx
++#define hmac_sha384_ctx ifm_hmac_sha384_ctx
++#define hmac_sha512_ctx ifm_hmac_sha512_ctx
++#define hmac_gosthash94_ctx ifm_hmac_gosthash94_ctx
++#define hmac_gosthash94cp_ctx ifm_hmac_gosthash94cp_ctx
++#define hmac_streebog256_ctx ifm_hmac_streebog256_ctx
++#define hmac_streebog512_ctx ifm_hmac_streebog512_ctx
++#define hmac_sm3_ctx ifm_hmac_sm3_ctx
++
++#define HMAC_TEST(alg, key, msg, mac) \
++    do {                              \
++        struct hmac_##alg##_ctx ctx;  \
++                                      \
++        hmac_##alg##_set_key(&ctx, key->length, key->data); \
++        hmac_##alg##_update(&ctx, msg->length, msg->data);  \
++        digest[mac->length] = 17;     \
++        hmac_##alg##_digest(&ctx, mac->length, digest);     \
++        ASSERT(MEMEQ (mac->length, digest, mac->data));     \
++        ASSERT(digest[mac->length] == 17);                  \
++    } while (0)
++#endif
+ #include <nettle/macros.h>
+ #include <nettle/memxor.h>
+ #include <aes-padlock.h>
+diff --git a/lib/accelerated/x86/hmac-x86-ssse3.c b/lib/accelerated/x86/hmac-x86-ssse3.c
+index f4ead02..e75536d 100644
+--- a/lib/accelerated/x86/hmac-x86-ssse3.c
++++ b/lib/accelerated/x86/hmac-x86-ssse3.c
+@@ -28,7 +28,35 @@
+ #include <hash_int.h>
+ #include "errors.h"
+ #include <nettle/sha.h>
++#ifndef USE_IFM_NETTLE
+ #include <nettle/hmac.h>
++#else
++#include "ifm/hmac.h"
++#define hmac_md5_ctx ifm_hmac_md5_ctx
++#define hmac_ripemd160_ctx ifm_hmac_ripemd160_ctx
++#define hmac_sha1_ctx ifm_hmac_sha1_ctx
++#define hmac_sha224_ctx ifm_hmac_sha224_ctx
++#define hmac_sha256_ctx ifm_hmac_sha256_ctx
++#define hmac_sha384_ctx ifm_hmac_sha384_ctx
++#define hmac_sha512_ctx ifm_hmac_sha512_ctx
++#define hmac_gosthash94_ctx ifm_hmac_gosthash94_ctx
++#define hmac_gosthash94cp_ctx ifm_hmac_gosthash94cp_ctx
++#define hmac_streebog256_ctx ifm_hmac_streebog256_ctx
++#define hmac_streebog512_ctx ifm_hmac_streebog512_ctx
++#define hmac_sm3_ctx ifm_hmac_sm3_ctx
++
++#define HMAC_TEST(alg, key, msg, mac) \
++    do {                              \
++        struct hmac_##alg##_ctx ctx;  \
++                                      \
++        hmac_##alg##_set_key(&ctx, key->length, key->data); \
++        hmac_##alg##_update(&ctx, msg->length, msg->data);  \
++        digest[mac->length] = 17;     \
++        hmac_##alg##_digest(&ctx, mac->length, digest);     \
++        ASSERT(MEMEQ (mac->length, digest, mac->data));     \
++        ASSERT(digest[mac->length] == 17);                  \
++    } while (0)
++#endif
+ #include <nettle/macros.h>
+ #include <aes-x86.h>
+ #include <sha-x86.h>
+diff --git a/lib/accelerated/x86/sha-padlock.c b/lib/accelerated/x86/sha-padlock.c
+index 4c0da36..882afe6 100644
+--- a/lib/accelerated/x86/sha-padlock.c
++++ b/lib/accelerated/x86/sha-padlock.c
+@@ -25,7 +25,35 @@
+ #include <hash_int.h>
+ #include "errors.h"
+ #include <nettle/sha.h>
++#ifndef USE_IFM_NETTLE
+ #include <nettle/hmac.h>
++#else
++#include "ifm/hmac.h"
++#define hmac_md5_ctx ifm_hmac_md5_ctx
++#define hmac_ripemd160_ctx ifm_hmac_ripemd160_ctx
++#define hmac_sha1_ctx ifm_hmac_sha1_ctx
++#define hmac_sha224_ctx ifm_hmac_sha224_ctx
++#define hmac_sha256_ctx ifm_hmac_sha256_ctx
++#define hmac_sha384_ctx ifm_hmac_sha384_ctx
++#define hmac_sha512_ctx ifm_hmac_sha512_ctx
++#define hmac_gosthash94_ctx ifm_hmac_gosthash94_ctx
++#define hmac_gosthash94cp_ctx ifm_hmac_gosthash94cp_ctx
++#define hmac_streebog256_ctx ifm_hmac_streebog256_ctx
++#define hmac_streebog512_ctx ifm_hmac_streebog512_ctx
++#define hmac_sm3_ctx ifm_hmac_sm3_ctx
++
++#define HMAC_TEST(alg, key, msg, mac) \
++    do {                              \
++        struct hmac_##alg##_ctx ctx;  \
++                                      \
++        hmac_##alg##_set_key(&ctx, key->length, key->data); \
++        hmac_##alg##_update(&ctx, msg->length, msg->data);  \
++        digest[mac->length] = 17;     \
++        hmac_##alg##_digest(&ctx, mac->length, digest);     \
++        ASSERT(MEMEQ (mac->length, digest, mac->data));     \
++        ASSERT(digest[mac->length] == 17);                  \
++    } while (0)
++#endif
+ #include <nettle/macros.h>
+ #include <aes-padlock.h>
+ #include <assert.h>
+diff --git a/lib/accelerated/x86/sha-x86-ssse3.c b/lib/accelerated/x86/sha-x86-ssse3.c
+index 8ea4e54..1b36cd0 100644
+--- a/lib/accelerated/x86/sha-x86-ssse3.c
++++ b/lib/accelerated/x86/sha-x86-ssse3.c
+@@ -27,7 +27,11 @@
+ #include <aes-x86.h>
+ #include <nettle/sha.h>
+ #include <nettle/macros.h>
++#ifndef USE_IFM_NETTLE
+ #include <nettle/nettle-meta.h>
++#else
++#include "ifm/nettle-meta.h"
++#endif
+ #include <sha-x86.h>
+ #include <x86-common.h>
+ 
+diff --git a/lib/accelerated/x86/x86-common.c b/lib/accelerated/x86/x86-common.c
+index 80d37f4..729f9e3 100644
+--- a/lib/accelerated/x86/x86-common.c
++++ b/lib/accelerated/x86/x86-common.c
+@@ -34,7 +34,17 @@
+ #include <sha-x86.h>
+ #include <x86-common.h>
+ #ifdef HAVE_LIBNETTLE
+-# include <nettle/aes.h>		/* for key generation in 192 and 256 bits */
++#ifndef USE_IFM_NETTLE
++#include <nettle/aes.h>
++#else
++#include "ifm/aes.h"
++#define aes128_ctx ifm_aes128_ctx
++#define aes192_ctx ifm_aes192_ctx
++#define aes256_ctx ifm_aes256_ctx
++#define aes_ctx ifm_aes_ctx
++#define _AES192_ROUNDS IFM_AES192_ROUNDS
++#define _AES256_ROUNDS IFM_AES256_ROUNDS
++#endif		/* for key generation in 192 and 256 bits */
+ # include <sha-padlock.h>
+ #endif
+ #include <aes-padlock.h>
+diff --git a/lib/nettle/cipher.c b/lib/nettle/cipher.c
+index ab4c46d..5f3a961 100644
+--- a/lib/nettle/cipher.c
++++ b/lib/nettle/cipher.c
+@@ -27,7 +27,13 @@
+ #include "gnutls_int.h"
+ #include "errors.h"
+ #include <cipher_int.h>
++#ifndef USE_IFM_NETTLE
+ #include <nettle/aes.h>
++#else
++#include "ifm/aes.h"
++#define _AES192_ROUNDS IFM_AES192_ROUNDS
++#define _AES256_ROUNDS IFM_AES256_ROUNDS
++#endif
+ #include <nettle/camellia.h>
+ #include <nettle/arcfour.h>
+ #include <nettle/arctwo.h>
+@@ -53,8 +59,23 @@
+ #include "gost/acpkm.h"
+ #include <nettle/ctr.h>
+ #endif
++#ifndef USE_IFM_NETTLE
+ #include <nettle/nettle-meta.h>
++#else
++#include "ifm/nettle-meta.h"
++#endif
++#ifndef USE_IFM_NETTLE
+ #include <nettle/cbc.h>
++#else
++#include "ifm/cbc.h"
++
++/* Test with more data and inplace decryption, to check that the
++ * cbc_decrypt buffering works. */
++#define CBC_BULK_DATA 0x2710 /* 10000 */
++
++#define CBC_SET_IV(ctx, data) \
++memcpy((ctx)->iv, (data), sizeof((ctx)->iv)
++#endif
+ #include <nettle/gcm.h>
+ #include <nettle/ccm.h>
+ #include <nettle/chacha.h>
+diff --git a/lib/nettle/gost/bignum-le.h b/lib/nettle/gost/bignum-le.h
+index 3672ad2..d6723bf 100644
+--- a/lib/nettle/gost/bignum-le.h
++++ b/lib/nettle/gost/bignum-le.h
+@@ -34,7 +34,11 @@
+ #ifndef GNUTLS_LIB_NETTLE_GOST_BIGNUM_LE_H
+ #define GNUTLS_LIB_NETTLE_GOST_BIGNUM_LE_H
+ 
++#ifndef USE_IFM_NETTLE
+ #include <nettle/nettle-meta.h>
++#else
++#include "ifm/nettle-meta.h"
++#endif
+ 
+ #include <nettle/nettle-types.h>
+ 
+diff --git a/lib/nettle/gost/hmac-gost.h b/lib/nettle/gost/hmac-gost.h
+index c8212ab..96281f5 100644
+--- a/lib/nettle/gost/hmac-gost.h
++++ b/lib/nettle/gost/hmac-gost.h
+@@ -36,7 +36,35 @@
+ 
+ #include "config.h"
+ 
++#ifndef USE_IFM_NETTLE
+ #include <nettle/hmac.h>
++#else
++#include "ifm/hmac.h"
++#define hmac_md5_ctx ifm_hmac_md5_ctx
++#define hmac_ripemd160_ctx ifm_hmac_ripemd160_ctx
++#define hmac_sha1_ctx ifm_hmac_sha1_ctx
++#define hmac_sha224_ctx ifm_hmac_sha224_ctx
++#define hmac_sha256_ctx ifm_hmac_sha256_ctx
++#define hmac_sha384_ctx ifm_hmac_sha384_ctx
++#define hmac_sha512_ctx ifm_hmac_sha512_ctx
++#define hmac_gosthash94_ctx ifm_hmac_gosthash94_ctx
++#define hmac_gosthash94cp_ctx ifm_hmac_gosthash94cp_ctx
++#define hmac_streebog256_ctx ifm_hmac_streebog256_ctx
++#define hmac_streebog512_ctx ifm_hmac_streebog512_ctx
++#define hmac_sm3_ctx ifm_hmac_sm3_ctx
++
++#define HMAC_TEST(alg, key, msg, mac) \
++    do {                              \
++        struct hmac_##alg##_ctx ctx;  \
++                                      \
++        hmac_##alg##_set_key(&ctx, key->length, key->data); \
++        hmac_##alg##_update(&ctx, msg->length, msg->data);  \
++        digest[mac->length] = 17;     \
++        hmac_##alg##_digest(&ctx, mac->length, digest);     \
++        ASSERT(MEMEQ (mac->length, digest, mac->data));     \
++        ASSERT(digest[mac->length] == 17);                  \
++    } while (0)
++#endif
+ 
+ #ifndef HAVE_NETTLE_STREEBOG512_UPDATE
+ #include "streebog.h"
+diff --git a/lib/nettle/gost/hmac-streebog.c b/lib/nettle/gost/hmac-streebog.c
+index 00fcdb9..7f1f618 100644
+--- a/lib/nettle/gost/hmac-streebog.c
++++ b/lib/nettle/gost/hmac-streebog.c
+@@ -38,7 +38,35 @@
+ #ifndef HAVE_NETTLE_STREEBOG512_UPDATE
+ #include <gnutls_int.h>
+ 
++#ifndef USE_IFM_NETTLE
+ #include <nettle/hmac.h>
++#else
++#include "ifm/hmac.h"
++#define hmac_md5_ctx ifm_hmac_md5_ctx
++#define hmac_ripemd160_ctx ifm_hmac_ripemd160_ctx
++#define hmac_sha1_ctx ifm_hmac_sha1_ctx
++#define hmac_sha224_ctx ifm_hmac_sha224_ctx
++#define hmac_sha256_ctx ifm_hmac_sha256_ctx
++#define hmac_sha384_ctx ifm_hmac_sha384_ctx
++#define hmac_sha512_ctx ifm_hmac_sha512_ctx
++#define hmac_gosthash94_ctx ifm_hmac_gosthash94_ctx
++#define hmac_gosthash94cp_ctx ifm_hmac_gosthash94cp_ctx
++#define hmac_streebog256_ctx ifm_hmac_streebog256_ctx
++#define hmac_streebog512_ctx ifm_hmac_streebog512_ctx
++#define hmac_sm3_ctx ifm_hmac_sm3_ctx
++
++#define HMAC_TEST(alg, key, msg, mac) \
++    do {                              \
++        struct hmac_##alg##_ctx ctx;  \
++                                      \
++        hmac_##alg##_set_key(&ctx, key->length, key->data); \
++        hmac_##alg##_update(&ctx, msg->length, msg->data);  \
++        digest[mac->length] = 17;     \
++        hmac_##alg##_digest(&ctx, mac->length, digest);     \
++        ASSERT(MEMEQ (mac->length, digest, mac->data));     \
++        ASSERT(digest[mac->length] == 17);                  \
++    } while (0)
++#endif
+ #include "hmac-gost.h"
+ 
+ void
+diff --git a/lib/nettle/gost/streebog-meta.c b/lib/nettle/gost/streebog-meta.c
+index c64fa00..44fe8a9 100644
+--- a/lib/nettle/gost/streebog-meta.c
++++ b/lib/nettle/gost/streebog-meta.c
+@@ -36,7 +36,11 @@
+ #ifndef HAVE_NETTLE_STREEBOG512_UPDATE
+ #include <gnutls_int.h>
+ 
++#ifndef USE_IFM_NETTLE
+ #include <nettle/nettle-meta.h>
++#else
++#include "ifm/nettle-meta.h"
++#endif
+ 
+ #include "streebog.h"
+ 
+diff --git a/lib/nettle/gost/streebog.h b/lib/nettle/gost/streebog.h
+index e2348bb..35e4711 100644
+--- a/lib/nettle/gost/streebog.h
++++ b/lib/nettle/gost/streebog.h
+@@ -37,7 +37,11 @@
+ #include "config.h"
+ 
+ #include <nettle/nettle-types.h>
++#ifndef USE_IFM_NETTLE
+ #include <nettle/nettle-meta.h>
++#else
++#include "ifm/nettle-meta.h"
++#endif
+ 
+ #ifdef __cplusplus
+ extern "C" {
+diff --git a/lib/nettle/int/drbg-aes.c b/lib/nettle/int/drbg-aes.c
+index af8b347..6c8ee59 100644
+--- a/lib/nettle/int/drbg-aes.c
++++ b/lib/nettle/int/drbg-aes.c
+@@ -21,7 +21,17 @@
+ #include <config.h>
+ #include <drbg-aes.h>
+ #include <nettle/memxor.h>
++#ifndef USE_IFM_NETTLE
+ #include <nettle/aes.h>
++#else
++#include "ifm/aes.h"
++#define aes128_ctx ifm_aes128_ctx
++#define aes192_ctx ifm_aes192_ctx
++#define aes256_ctx ifm_aes256_ctx
++#define aes_ctx ifm_aes_ctx
++#define _AES192_ROUNDS IFM_AES192_ROUNDS
++#define _AES256_ROUNDS IFM_AES256_ROUNDS
++#endif
+ #include <minmax.h>
+ #include <string.h>
+ #include <stdio.h>
+diff --git a/lib/nettle/int/drbg-aes.h b/lib/nettle/int/drbg-aes.h
+index ac2b858..2b67a46 100644
+--- a/lib/nettle/int/drbg-aes.h
++++ b/lib/nettle/int/drbg-aes.h
+@@ -25,7 +25,17 @@
+ #define GNUTLS_LIB_NETTLE_INT_DRBG_AES_H
+ 
+ #include <config.h>
++#ifndef USE_IFM_NETTLE
+ #include <nettle/aes.h>
++#else
++#include "ifm/aes.h"
++#define aes128_ctx ifm_aes128_ctx
++#define aes192_ctx ifm_aes192_ctx
++#define aes256_ctx ifm_aes256_ctx
++#define aes_ctx ifm_aes_ctx
++#define _AES192_ROUNDS IFM_AES192_ROUNDS
++#define _AES256_ROUNDS IFM_AES256_ROUNDS
++#endif
+ 
+ /* This is nettle's increment macro */
+ /* Requires that size > 0 */
+diff --git a/lib/nettle/int/dsa-fips.h b/lib/nettle/int/dsa-fips.h
+index 351e856..d742137 100644
+--- a/lib/nettle/int/dsa-fips.h
++++ b/lib/nettle/int/dsa-fips.h
+@@ -26,7 +26,13 @@
+ 
+ #include <nettle/bignum.h> /* includes gmp.h */
+ #include <nettle/dsa.h>
++#ifndef USE_IFM_NETTLE
+ #include <nettle/sha2.h>
++#else
++#include "ifm/sha2.h"
++#define sha384_ctx ifm_sha384_ctx
++#define sha384_update ifm_sha384_update
++#endif
+ #include <fips.h>
+ 
+ #define div_ceil(x,y) ((x+(y)-1)/(y))
+diff --git a/lib/nettle/int/rsa-fips.h b/lib/nettle/int/rsa-fips.h
+index a2a418a..09e8ea3 100644
+--- a/lib/nettle/int/rsa-fips.h
++++ b/lib/nettle/int/rsa-fips.h
+@@ -24,7 +24,44 @@
+ #ifndef GNUTLS_LIB_NETTLE_INT_RSA_FIPS_H
+ #define GNUTLS_LIB_NETTLE_INT_RSA_FIPS_H
+ 
++#ifndef USE_IFM_NETTLE
+ #include <nettle/rsa.h>
++#else
++#include "ifm/rsa.h"
++#define rsa_public_key ifm_rsa_public_key
++#define rsa_private_key ifm_rsa_private_key
++
++/* Expects local variables pub, key, rstate, digest, signature */
++#define SIGN(hash, msg, expected) do { \
++    hash##_update(&hash, LDATA(msg));  \
++    ASSERT(rsa_##hash##_sign(key, &hash, signature));    \
++    fprintf(stderr, "rsa-%s signature: ", #hash);        \
++        mpz_out_str(stderr, 16, signature);              \
++        fprintf(stderr, "\n");         \
++    ASSERT(mpz_cmp (signature, expected) == 0);          \
++                                       \
++    hash##_update(&hash, LDATA(msg));  \
++    ASSERT(rsa_##hash##_sign_tr(pub, key, &rstate,       \
++                  (nettle_random_func *) knuth_lfib_random, \
++                  &hash, signature));  \
++    ASSERT(mpz_cmp (signature, expected) == 0);          \
++                                       \
++    hash##_update(&hash, LDATA(msg));  \
++    hash##_digest(&hash, sizeof(digest), digest);        \
++    ASSERT(rsa_##hash##_sign_digest(key, digest, signature)); \
++    ASSERT(mpz_cmp (signature, expected) == 0);          \
++                                       \
++    ASSERT(rsa_##hash##_sign_digest_tr(pub, key, &rstate,     \
++                     (nettle_random_func *)knuth_lfib_random, \
++                     digest, signature));                \
++    ASSERT(mpz_cmp (signature, expected) == 0);          \
++}while (0)
++
++#define VERIFY(key, hash, msg, signature) ( \
++    hash##_update(&hash, LDATA(msg)),       \
++    rsa_##hash##_verify(key, &hash, signature) \
++)
++#endif
+ 
+ int
+ _rsa_generate_fips186_4_keypair(struct rsa_public_key *pub,
+diff --git a/lib/nettle/int/rsa-keygen-fips186.c b/lib/nettle/int/rsa-keygen-fips186.c
+index 438101e..eccfd14 100644
+--- a/lib/nettle/int/rsa-keygen-fips186.c
++++ b/lib/nettle/int/rsa-keygen-fips186.c
+@@ -31,7 +31,44 @@
+ #include <stdio.h>
+ #include <string.h>
+ 
++#ifndef USE_IFM_NETTLE
+ #include <nettle/rsa.h>
++#else
++#include "ifm/rsa.h"
++#define rsa_public_key ifm_rsa_public_key
++#define rsa_private_key ifm_rsa_private_key
++
++/* Expects local variables pub, key, rstate, digest, signature */
++#define SIGN(hash, msg, expected) do { \
++    hash##_update(&hash, LDATA(msg));  \
++    ASSERT(rsa_##hash##_sign(key, &hash, signature));    \
++    fprintf(stderr, "rsa-%s signature: ", #hash);        \
++        mpz_out_str(stderr, 16, signature);              \
++        fprintf(stderr, "\n");         \
++    ASSERT(mpz_cmp (signature, expected) == 0);          \
++                                       \
++    hash##_update(&hash, LDATA(msg));  \
++    ASSERT(rsa_##hash##_sign_tr(pub, key, &rstate,       \
++                  (nettle_random_func *) knuth_lfib_random, \
++                  &hash, signature));  \
++    ASSERT(mpz_cmp (signature, expected) == 0);          \
++                                       \
++    hash##_update(&hash, LDATA(msg));  \
++    hash##_digest(&hash, sizeof(digest), digest);        \
++    ASSERT(rsa_##hash##_sign_digest(key, digest, signature)); \
++    ASSERT(mpz_cmp (signature, expected) == 0);          \
++                                       \
++    ASSERT(rsa_##hash##_sign_digest_tr(pub, key, &rstate,     \
++                     (nettle_random_func *)knuth_lfib_random, \
++                     digest, signature));                \
++    ASSERT(mpz_cmp (signature, expected) == 0);          \
++}while (0)
++
++#define VERIFY(key, hash, msg, signature) ( \
++    hash##_update(&hash, LDATA(msg)),       \
++    rsa_##hash##_verify(key, &hash, signature) \
++)
++#endif
+ #include <dsa-fips.h>
+ #include <rsa-fips.h>
+ 
+diff --git a/lib/nettle/int/tls1-prf.c b/lib/nettle/int/tls1-prf.c
+index 19ca5d3..43e351f 100644
+--- a/lib/nettle/int/tls1-prf.c
++++ b/lib/nettle/int/tls1-prf.c
+@@ -32,11 +32,44 @@
+ #include <stdlib.h>
+ #include <string.h>
+ 
++#ifndef USE_IFM_NETTLE
+ #include <nettle/hmac.h>
++#else
++#include "ifm/hmac.h"
++#define hmac_md5_ctx ifm_hmac_md5_ctx
++#define hmac_ripemd160_ctx ifm_hmac_ripemd160_ctx
++#define hmac_sha1_ctx ifm_hmac_sha1_ctx
++#define hmac_sha224_ctx ifm_hmac_sha224_ctx
++#define hmac_sha256_ctx ifm_hmac_sha256_ctx
++#define hmac_sha384_ctx ifm_hmac_sha384_ctx
++#define hmac_sha512_ctx ifm_hmac_sha512_ctx
++#define hmac_gosthash94_ctx ifm_hmac_gosthash94_ctx
++#define hmac_gosthash94cp_ctx ifm_hmac_gosthash94cp_ctx
++#define hmac_streebog256_ctx ifm_hmac_streebog256_ctx
++#define hmac_streebog512_ctx ifm_hmac_streebog512_ctx
++#define hmac_sm3_ctx ifm_hmac_sm3_ctx
++
++#define HMAC_TEST(alg, key, msg, mac) \
++    do {                              \
++        struct hmac_##alg##_ctx ctx;  \
++                                      \
++        hmac_##alg##_set_key(&ctx, key->length, key->data); \
++        hmac_##alg##_update(&ctx, msg->length, msg->data);  \
++        digest[mac->length] = 17;     \
++        hmac_##alg##_digest(&ctx, mac->length, digest);     \
++        ASSERT(MEMEQ (mac->length, digest, mac->data));     \
++        ASSERT(digest[mac->length] == 17);                  \
++    } while (0)
++#endif
+ #include <nettle/memxor.h>
+ #include "int/tls1-prf.h"
+ #include <nettle/sha1.h>
++#ifndef USE_IFM_NETTLE
+ #include <nettle/md5.h>
++#else
++#include "ifm/md5.h"
++#define md5_ctx ifm_md5_ctx
++#endif
+ 
+ 
+ /* The RFC2246 P_hash() function. The mac_ctx is expected to
+diff --git a/lib/nettle/int/tls1-prf.h b/lib/nettle/int/tls1-prf.h
+index e79d1c8..e4eb55c 100644
+--- a/lib/nettle/int/tls1-prf.h
++++ b/lib/nettle/int/tls1-prf.h
+@@ -23,7 +23,11 @@
+ #ifndef GNUTLS_LIB_NETTLE_INT_TLS1_PRF_H
+ #define GNUTLS_LIB_NETTLE_INT_TLS1_PRF_H
+ 
++#ifndef USE_IFM_NETTLE
+ #include <nettle/nettle-meta.h>
++#else
++#include "ifm/nettle-meta.h"
++#endif
+ 
+ #define MAX_PRF_BYTES 200
+ 
+diff --git a/lib/nettle/mac.c b/lib/nettle/mac.c
+index 1b20a0c..62167e8 100644
+--- a/lib/nettle/mac.c
++++ b/lib/nettle/mac.c
+@@ -26,11 +26,44 @@
+ #include "gnutls_int.h"
+ #include <hash_int.h>
+ #include "errors.h"
++#ifndef USE_IFM_NETTLE
+ #include <nettle/md5.h>
++#else
++#include "ifm/md5.h"
++#define md5_ctx ifm_md5_ctx
++#endif
+ #include <nettle/md2.h>
+ #include <nettle/sha.h>
+ #include <nettle/sha3.h>
++#ifndef USE_IFM_NETTLE
+ #include <nettle/hmac.h>
++#else
++#include "ifm/hmac.h"
++#define hmac_md5_ctx ifm_hmac_md5_ctx
++#define hmac_ripemd160_ctx ifm_hmac_ripemd160_ctx
++#define hmac_sha1_ctx ifm_hmac_sha1_ctx
++#define hmac_sha224_ctx ifm_hmac_sha224_ctx
++#define hmac_sha256_ctx ifm_hmac_sha256_ctx
++#define hmac_sha384_ctx ifm_hmac_sha384_ctx
++#define hmac_sha512_ctx ifm_hmac_sha512_ctx
++#define hmac_gosthash94_ctx ifm_hmac_gosthash94_ctx
++#define hmac_gosthash94cp_ctx ifm_hmac_gosthash94cp_ctx
++#define hmac_streebog256_ctx ifm_hmac_streebog256_ctx
++#define hmac_streebog512_ctx ifm_hmac_streebog512_ctx
++#define hmac_sm3_ctx ifm_hmac_sm3_ctx
++
++#define HMAC_TEST(alg, key, msg, mac) \
++    do {                              \
++        struct hmac_##alg##_ctx ctx;  \
++                                      \
++        hmac_##alg##_set_key(&ctx, key->length, key->data); \
++        hmac_##alg##_update(&ctx, msg->length, msg->data);  \
++        digest[mac->length] = 17;     \
++        hmac_##alg##_digest(&ctx, mac->length, digest);     \
++        ASSERT(MEMEQ (mac->length, digest, mac->data));     \
++        ASSERT(digest[mac->length] == 17);                  \
++    } while (0)
++#endif
+ #include <nettle/umac.h>
+ #include <nettle/hkdf.h>
+ #include <nettle/pbkdf2.h>
+diff --git a/lib/nettle/pk.c b/lib/nettle/pk.c
+index ff8e3d1..323af91 100644
+--- a/lib/nettle/pk.c
++++ b/lib/nettle/pk.c
+@@ -41,7 +41,44 @@
+ #include <nettle/dsa.h>
+ #include <dsa-fips.h>
+ #include <rsa-fips.h>
++#ifndef USE_IFM_NETTLE
+ #include <nettle/rsa.h>
++#else
++#include "ifm/rsa.h"
++#define rsa_public_key ifm_rsa_public_key
++#define rsa_private_key ifm_rsa_private_key
++
++/* Expects local variables pub, key, rstate, digest, signature */
++#define SIGN(hash, msg, expected) do { \
++    hash##_update(&hash, LDATA(msg));  \
++    ASSERT(rsa_##hash##_sign(key, &hash, signature));    \
++    fprintf(stderr, "rsa-%s signature: ", #hash);        \
++        mpz_out_str(stderr, 16, signature);              \
++        fprintf(stderr, "\n");         \
++    ASSERT(mpz_cmp (signature, expected) == 0);          \
++                                       \
++    hash##_update(&hash, LDATA(msg));  \
++    ASSERT(rsa_##hash##_sign_tr(pub, key, &rstate,       \
++                  (nettle_random_func *) knuth_lfib_random, \
++                  &hash, signature));  \
++    ASSERT(mpz_cmp (signature, expected) == 0);          \
++                                       \
++    hash##_update(&hash, LDATA(msg));  \
++    hash##_digest(&hash, sizeof(digest), digest);        \
++    ASSERT(rsa_##hash##_sign_digest(key, digest, signature)); \
++    ASSERT(mpz_cmp (signature, expected) == 0);          \
++                                       \
++    ASSERT(rsa_##hash##_sign_digest_tr(pub, key, &rstate,     \
++                     (nettle_random_func *)knuth_lfib_random, \
++                     digest, signature));                \
++    ASSERT(mpz_cmp (signature, expected) == 0);          \
++}while (0)
++
++#define VERIFY(key, hash, msg, signature) ( \
++    hash##_update(&hash, LDATA(msg)),       \
++    rsa_##hash##_verify(key, &hash, signature) \
++)
++#endif
+ #include <gnutls/crypto.h>
+ #include <nettle/bignum.h>
+ #include <nettle/ecc.h>
+diff --git a/lib/nettle/prf.c b/lib/nettle/prf.c
+index 631ba3b..56de03f 100644
+--- a/lib/nettle/prf.c
++++ b/lib/nettle/prf.c
+@@ -22,7 +22,35 @@
+ 
+ #include <gnutls_int.h>
+ #include "int/tls1-prf.h"
++#ifndef USE_IFM_NETTLE
+ #include <nettle/hmac.h>
++#else
++#include "ifm/hmac.h"
++#define hmac_md5_ctx ifm_hmac_md5_ctx
++#define hmac_ripemd160_ctx ifm_hmac_ripemd160_ctx
++#define hmac_sha1_ctx ifm_hmac_sha1_ctx
++#define hmac_sha224_ctx ifm_hmac_sha224_ctx
++#define hmac_sha256_ctx ifm_hmac_sha256_ctx
++#define hmac_sha384_ctx ifm_hmac_sha384_ctx
++#define hmac_sha512_ctx ifm_hmac_sha512_ctx
++#define hmac_gosthash94_ctx ifm_hmac_gosthash94_ctx
++#define hmac_gosthash94cp_ctx ifm_hmac_gosthash94cp_ctx
++#define hmac_streebog256_ctx ifm_hmac_streebog256_ctx
++#define hmac_streebog512_ctx ifm_hmac_streebog512_ctx
++#define hmac_sm3_ctx ifm_hmac_sm3_ctx
++
++#define HMAC_TEST(alg, key, msg, mac) \
++    do {                              \
++        struct hmac_##alg##_ctx ctx;  \
++                                      \
++        hmac_##alg##_set_key(&ctx, key->length, key->data); \
++        hmac_##alg##_update(&ctx, msg->length, msg->data);  \
++        digest[mac->length] = 17;     \
++        hmac_##alg##_digest(&ctx, mac->length, digest);     \
++        ASSERT(MEMEQ (mac->length, digest, mac->data));     \
++        ASSERT(digest[mac->length] == 17);                  \
++    } while (0)
++#endif
+ #if ENABLE_GOST
+ #include "gost/hmac-gost.h"
+ #endif
+diff --git a/lib/nettle/rnd-fips.c b/lib/nettle/rnd-fips.c
+index ccb92d2..469fe7f 100644
+--- a/lib/nettle/rnd-fips.c
++++ b/lib/nettle/rnd-fips.c
+@@ -27,7 +27,13 @@
+ 
+ #include "gnutls_int.h"
+ #include "errors.h"
++#ifndef USE_IFM_NETTLE
+ #include <nettle/sha2.h>
++#else
++#include "ifm/sha2.h"
++#define sha384_ctx ifm_sha384_ctx
++#define sha256_ctx ifm_sha256_ctx
++#endif
+ #include <atfork.h>
+ #include <rnd-common.h>
+ 
+diff --git a/lib/x509/privkey_pkcs8_pbes1.c b/lib/x509/privkey_pkcs8_pbes1.c
+index 70217da..4caaf77 100644
+--- a/lib/x509/privkey_pkcs8_pbes1.c
++++ b/lib/x509/privkey_pkcs8_pbes1.c
+@@ -31,7 +31,12 @@
+ #include "x509_int.h"
+ #include "pkcs7_int.h"
+ #include <algorithms.h>
++#ifndef USE_IFM_NETTLE
+ #include <nettle/md5.h>
++#else
++#include "ifm/md5.h"
++#define md5_ctx ifm_md5_ctx
++#endif
+ 
+ /* This file includes support for PKCS#8 PBES1 with DES and MD5.
+  * We only support decryption for compatibility with other software.
+diff --git a/tests/cipher-alignment.c b/tests/cipher-alignment.c
+index 65b763a..07b78f1 100644
+--- a/tests/cipher-alignment.c
++++ b/tests/cipher-alignment.c
+@@ -50,8 +50,33 @@ int main(int argc, char **argv)
+ #include <unistd.h>
+ #include <gnutls/gnutls.h>
+ #include <gnutls/crypto.h>
++#ifndef USE_IFM_NETTLE
+ #include <nettle/aes.h>
++#else
++#include "ifm/aes.h"
++#define aes128_ctx ifm_aes128_ctx
++#define aes192_ctx ifm_aes192_ctx
++#define aes256_ctx ifm_aes256_ctx
++#define aes_ctx ifm_aes_ctx
++#define _AES192_ROUNDS IFM_AES192_ROUNDS
++#define _AES256_ROUNDS IFM_AES256_ROUNDS
++#endif
++#ifndef USE_IFM_NETTLE
+ #include <nettle/cbc.h>
++#else
++#include "ifm/cbc.h"
++#define aes128_ctx ifm_aes128_ctx
++#define aes192_ctx ifm_aes192_ctx
++#define aes256_ctx ifm_aes256_ctx
++#define aes_ctx ifm_aes_ctx
++
++/* Test with more data and inplace decryption, to check that the
++ * cbc_decrypt buffering works. */
++#define CBC_BULK_DATA 0x2710 /* 10000 */
++
++#define CBC_SET_IV(ctx, data) \
++memcpy((ctx)->iv, (data), sizeof((ctx)->iv)
++#endif
+ #include <nettle/gcm.h>
+ #include <assert.h>
+ 
+-- 
+2.33.0
+
