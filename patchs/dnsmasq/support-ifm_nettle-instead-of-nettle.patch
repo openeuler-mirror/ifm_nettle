@@ -1,0 +1,114 @@
+From 461ebf6b07be4dc81aaa04582edc6a08bb475742 Mon Sep 17 00:00:00 2001
+From: tannnxin <njutanx@163.com>
+Date: Fri, 8 Dec 2023 19:58:53 +0800
+Subject: [PATCH] support ifm_nettle instead of nettle
+
+---
+ Makefile      | 14 ++++++++++----
+ src/crypto.c  | 37 ++++++++++++++++++++++++++++++++++++-
+ src/dnsmasq.h |  2 +-
+ 3 files changed, 47 insertions(+), 6 deletions(-)
+
+diff --git a/Makefile b/Makefile
+index 0cd592e..0fc1c9a 100644
+--- a/Makefile
++++ b/Makefile
+@@ -68,6 +68,12 @@ nettle_cflags = `echo $(COPTS) | $(top)/bld/pkg-wrapper HAVE_DNSSEC     $(PKG_CO
+ nettle_libs =   `echo $(COPTS) | $(top)/bld/pkg-wrapper HAVE_DNSSEC     $(PKG_CONFIG) --libs 'nettle hogweed' \
+                                                         HAVE_CRYPTOHASH $(PKG_CONFIG) --libs nettle \
+                                                         HAVE_NETTLEHASH $(PKG_CONFIG) --libs nettle`
++ifm_nettle_cflags = `echo $(COPTS) | $(top)/bld/pkg-wrapper HAVE_DNSSEC     $(PKG_CONFIG) --cflags 'ifm_nettle hogweed' \
++                                                        HAVE_CRYPTOHASH $(PKG_CONFIG) --cflags ifm_nettle \
++                                                        HAVE_NETTLEHASH $(PKG_CONFIG) --cflags ifm_nettle`
++ifm_nettle_libs =   `echo $(COPTS) | $(top)/bld/pkg-wrapper HAVE_DNSSEC     $(PKG_CONFIG) --libs 'ifm_nettle hogweed' \
++                                                        HAVE_CRYPTOHASH $(PKG_CONFIG) --libs ifm_nettle \
++                                                        HAVE_NETTLEHASH $(PKG_CONFIG) --libs ifm_nettle`
+ gmp_libs =      `echo $(COPTS) | $(top)/bld/pkg-wrapper HAVE_DNSSEC NO_GMP --copy -lgmp`
+ sunos_libs =    `if uname | grep SunOS >/dev/null 2>&1; then echo -lsocket -lnsl -lposix4; fi`
+ version =     -DVERSION='\"`$(top)/bld/get-version $(top)`\"'
+@@ -90,8 +96,8 @@ hdrs = dnsmasq.h config.h dhcp-protocol.h dhcp6-protocol.h \
+ all : $(BUILDDIR)
+ 	@cd $(BUILDDIR) && $(MAKE) \
+  top="$(top)" \
+- build_cflags="$(version) $(dbus_cflags) $(idn2_cflags) $(idn_cflags) $(ct_cflags) $(lua_cflags) $(nettle_cflags)" \
+- build_libs="$(dbus_libs) $(idn2_libs) $(idn_libs) $(ct_libs) $(lua_libs) $(sunos_libs) $(nettle_libs) $(gmp_libs) $(ubus_libs)" \
++ build_cflags="$(version) $(dbus_cflags) $(idn2_cflags) $(idn_cflags) $(ct_cflags) $(lua_cflags) $(nettle_cflags) $(ifm_nettle_cflags)" \
++ build_libs="$(dbus_libs) $(idn2_libs) $(idn_libs) $(ct_libs) $(lua_libs) $(sunos_libs) $(nettle_libs) $(ifm_nettle_libs) $(gmp_libs) $(ubus_libs)" \
+  -f $(top)/Makefile dnsmasq 
+ 
+ mostly_clean :
+@@ -115,8 +121,8 @@ all-i18n : $(BUILDDIR)
+ 	@cd $(BUILDDIR) && $(MAKE) \
+  top="$(top)" \
+  i18n=-DLOCALEDIR=\'\"$(LOCALEDIR)\"\' \
+- build_cflags="$(version) $(dbus_cflags) $(idn2_cflags) $(idn_cflags) $(ct_cflags) $(lua_cflags) $(nettle_cflags)" \
+- build_libs="$(dbus_libs) $(idn2_libs) $(idn_libs) $(ct_libs) $(lua_libs) $(sunos_libs) $(nettle_libs) $(gmp_libs) $(ubus_libs)"  \
++ build_cflags="$(version) $(dbus_cflags) $(idn2_cflags) $(idn_cflags) $(ct_cflags) $(lua_cflags) $(nettle_cflags) $(ifm_nettle_cflags)" \
++ build_libs="$(dbus_libs) $(idn2_libs) $(idn_libs) $(ct_libs) $(lua_libs) $(sunos_libs) $(nettle_libs) $(ifm_nettle_libs) $(gmp_libs) $(ubus_libs)"  \
+  -f $(top)/Makefile dnsmasq
+ 	for f in `cd $(PO); echo *.po`; do \
+ 		cd $(top) && cd $(BUILDDIR) && $(MAKE) top="$(top)" -f $(top)/Makefile $${f%.po}.mo; \
+diff --git a/src/crypto.c b/src/crypto.c
+index 4009569..ea1f0c6 100644
+--- a/src/crypto.c
++++ b/src/crypto.c
+@@ -33,7 +33,42 @@
+ #endif /* defined(HAVE_DNSSEC) || defined(HAVE_CRYPTOHASH) */
+ 
+ #if defined(HAVE_DNSSEC)
+-#include <nettle/rsa.h>
++
++#include "ifm/rsa.h"
++#define rsa_public_key ifm_rsa_public_key
++#define rsa_private_key ifm_rsa_private_key
++
++/* Expects local variables pub, key, rstate, digest, signature */
++#define SIGN(hash, msg, expected) do { \
++    hash##_update(&hash, LDATA(msg));  \
++    ASSERT(rsa_##hash##_sign(key, &hash, signature));    \
++    fprintf(stderr, "rsa-%s signature: ", #hash);        \
++        mpz_out_str(stderr, 16, signature);              \
++        fprintf(stderr, "\n");         \
++    ASSERT(mpz_cmp (signature, expected) == 0);          \
++                                       \
++    hash##_update(&hash, LDATA(msg));  \
++    ASSERT(rsa_##hash##_sign_tr(pub, key, &rstate,       \
++                  (nettle_random_func *) knuth_lfib_random, \
++                  &hash, signature));  \
++    ASSERT(mpz_cmp (signature, expected) == 0);          \
++                                       \
++    hash##_update(&hash, LDATA(msg));  \
++    hash##_digest(&hash, sizeof(digest), digest);        \
++    ASSERT(rsa_##hash##_sign_digest(key, digest, signature)); \
++    ASSERT(mpz_cmp (signature, expected) == 0);          \
++                                       \
++    ASSERT(rsa_##hash##_sign_digest_tr(pub, key, &rstate,     \
++                     (nettle_random_func *)knuth_lfib_random, \
++                     digest, signature));                \
++    ASSERT(mpz_cmp (signature, expected) == 0);          \
++}while (0)
++
++#define VERIFY(key, hash, msg, signature) ( \
++    hash##_update(&hash, LDATA(msg)),       \
++    rsa_##hash##_verify(key, &hash, signature) \
++)
++
+ #include <nettle/ecdsa.h>
+ #include <nettle/ecc-curve.h>
+ #if MIN_VERSION(3, 1)
+diff --git a/src/dnsmasq.h b/src/dnsmasq.h
+index 8674823..08b76fd 100644
+--- a/src/dnsmasq.h
++++ b/src/dnsmasq.h
+@@ -159,7 +159,7 @@ extern int capget(cap_user_header_t header, cap_user_data_t data);
+ #  define HAVE_CRYPTOHASH
+ #endif
+ #if defined(HAVE_DNSSEC) || defined(HAVE_CRYPTOHASH)
+-#  include <nettle/nettle-meta.h>
++#  include "ifm/nettle-meta.h"
+ #endif
+ 
+ /* daemon is function in the C library.... */
+-- 
+2.33.0
+
