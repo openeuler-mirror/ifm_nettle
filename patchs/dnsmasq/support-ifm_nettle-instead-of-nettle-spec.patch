@@ -1,0 +1,42 @@
+From be1d205df5784c59867864cfe7493809c3bbb06e Mon Sep 17 00:00:00 2001
+From: tannnxin <njutanx@163.com>
+Date: Fri, 8 Dec 2023 20:12:50 +0800
+Subject: [PATCH] support ifm_nettle instead of nettle spec
+
+---
+ dnsmasq.spec | 6 +++++-
+ 1 file changed, 5 insertions(+), 1 deletion(-)
+
+diff --git a/dnsmasq.spec b/dnsmasq.spec
+index b9a8c4c..27e5f66 100644
+--- a/dnsmasq.spec
++++ b/dnsmasq.spec
+@@ -1,6 +1,6 @@
+ Name:           dnsmasq
+ Version:        2.86
+-Release:        7
++Release:        8
+ Summary:        Dnsmasq provides network infrastructure for small networks
+ License:        GPLv2 or GPLv3
+ URL:            http://www.thekelleys.org.uk/dnsmasq/
+@@ -47,6 +47,7 @@ Patch36:        backport-Optimize-inserting-records-into-server-list.patch
+ Patch37:        backport-Fix-massive-confusion-on-server-reload.patch
+ Patch38:        backport-Fix-use-after-free-in-mark_servers.patch
+ Patch39:        backport-Fix-memory-leak-when-using-dhcp-optsfile-with-DHCPv6.patch
++Patch40:        support-ifm_nettle-instead-of-nettle.patch
+ 
+ BuildRequires:  gcc
+ BuildRequires:  dbus-devel pkgconfig libidn2-devel nettle-devel systemd
+@@ -136,6 +137,9 @@ install -Dpm644 %{SOURCE2} $RPM_BUILD_ROOT%{_sysusersdir}/dnsmasq.conf
+ %{_mandir}/man8/dnsmasq*
+ 
+ %changelog
++* Wed Dec 06 2023 tanxin <njutanx@163.com> - 2.86-8
++- DESC:support ifm_nettle instead of nettle
++
+ * Wed Nov 22 2023 renmingshuai <renmingshuai@huawei.com> - 2.86-7
+ - Type:bugfix
+ - Id:NA
+-- 
+2.33.0
+
