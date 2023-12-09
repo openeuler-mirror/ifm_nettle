@@ -1,10 +1,10 @@
 /******************************************************************************
- * gcrypt_sha2_meta.h: meta for gcry_uadk_sha2
+ * ifm_nettle-sm3_meta.h: meta for sm3
  *
  * Copyright (c) Huawei Technologies Co., Ltd. 2020. All rights reserved.
  *
  * Authors:
- * xinghailiao <xinghailiao@smail.xtu.edu.cn>
+ * jiaji2023 <jiaji@isrc.iscas.ac.cn>
  *
  * This library is free software; you can redistribute it and/or
  * modify it under the terms of the GNU Lesser General Public
@@ -20,51 +20,33 @@
  * License along with this library; if not, write to the Free Software
  * Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA  02110-1301  USA
  ********************************************************************************/
-#ifndef GCRY_UADK_SHA2_META_INCLUDED
-#define GCRY_UADK_SHA2_META_INCLUDED
+#ifndef IFM_NETTLE_SM4_META_H
+#define IFM_NETTLE_SM4_META_H
 
-#include <gcrypt.h>
-#include "uadk_meta.h"
-
+#include <stdint.h>
 #ifdef __aarch64__
-#include "uadk/v1/wd.h"
-#include "uadk/v1/wd_bmm.h"
-#include "uadk/v1/wd_digest.h"
+#include "uadk_meta.h"
 #endif
 
 #ifdef __cplusplus
 extern "C" {
 #endif
 
-#ifdef __aarch64__
-#define SHA256_DIGEST_SIZE 32
-#define SHA224_DIGEST_SIZE 28
-#define SHA512_DIGEST_SIZE 64
-#define SHA384_DIGEST_SIZE 48
-#define SM3_DIGEST_SIZE 32
-#define MAX_HMAC_KEY_SIZE 128
-struct gcrypt_digest_struct {
-    struct uadk_digest_st uadk_ctx;
-    enum gcry_md_algos alg;
-};
-#endif
+#define SM4_BLOCK_SIZE 16
+#define SM4_KEY_SIZE 16
 
-typedef struct gcry_uadk_md_hd {
-    gcry_md_hd_t gcry_hd_t;
-
+struct ifm_sm4_ctx {
+    uint32_t rkey[32];
 #ifdef __aarch64__
-    int ctx_len;
-    struct gcrypt_digest_struct alg_ctx[5];    /* gcrypt中每种alg的ctx对象，因为gcrypt中可能存在同时配置多种算法的场景 */
+    uint8_t uadk_key[SM4_KEY_SIZE];
+    struct uadk_cipher_st uadk_ctx;
     bool use_uadk;
-    bool use_gcry;
-    void *key;
-    size_t keylen;
-    uint8_t mode;
+    bool encrypt;
 #endif
-} *gcry_uadk_md_hd_t;
+};
 
 #ifdef __cplusplus
 }
 #endif
 
-#endif
+#endif // IFM_NETTLE_SM4_META_H

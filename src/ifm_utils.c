@@ -35,7 +35,7 @@
 
 #ifdef __aarch64__
 static IFMUadkShareResource g_resource[UADK_ALG_SIZE];        // 全局公共资源
-static bool is_init[UADK_ALG_SIZE] = {false, false, false};
+static bool is_init[UADK_ALG_SIZE] = {false, false, false, false};
 // 哈希的ctx中不包含key等信息，因此ctx可以共用
 IFMUadkAlgMode digest_alg_mode[] = {
     { .alg = WCRYPTO_MD5, .mode = WCRYPTO_DIGEST_NORMAL},
@@ -44,7 +44,8 @@ IFMUadkAlgMode digest_alg_mode[] = {
     { .alg = WCRYPTO_SHA384, .mode = WCRYPTO_DIGEST_NORMAL},
     { .alg = WCRYPTO_SHA512, .mode = WCRYPTO_DIGEST_NORMAL},
     { .alg = WCRYPTO_SHA512_224, .mode = WCRYPTO_DIGEST_NORMAL},
-    { .alg = WCRYPTO_SHA512_256, .mode = WCRYPTO_DIGEST_NORMAL}
+    { .alg = WCRYPTO_SHA512_256, .mode = WCRYPTO_DIGEST_NORMAL},
+    { .alg = WCRYPTO_SM3, .mode = WCRYPTO_DIGEST_NORMAL}
 };
 #endif
 
@@ -75,7 +76,8 @@ bool UadkEnabled(void)
     // 如果程序启动时候，uadk_init未成功初始化，则也不使能uadk
     if (is_init[IFM_UADK_ALG_DIGEST] == false || g_resource[IFM_UADK_ALG_DIGEST].pool == NULL
         || is_init[IFM_UADK_ALG_CIPHER] == false || g_resource[IFM_UADK_ALG_CIPHER].pool == NULL
-        || is_init[IFM_UADK_ALG_AEAD] == false || g_resource[IFM_UADK_ALG_AEAD].pool == NULL) {
+        || is_init[IFM_UADK_ALG_AEAD] == false || g_resource[IFM_UADK_ALG_AEAD].pool == NULL
+        || is_init[IFM_UADK_ALG_RSA] == false || g_resource[IFM_UADK_ALG_RSA].pool == NULL) {
         enabled = false;
     }
     IFM_ERR("UADK enbaled is %d\n", enabled);
@@ -102,6 +104,7 @@ IFMUadkShareCtx *get_uadk_ctx(UadkQueueAlgType alg_type, int alg, int mode, bool
     struct wcrypto_digest_ctx_setup digest_setup;
     struct wcrypto_cipher_ctx_setup  cipher_setup;
     struct wcrypto_aead_ctx_setup  aead_setup;
+    struct wcrypto_rsa_ctx_setup rsa_setup;
     void *ctx = NULL;
     IFMUadkShareCtx *new_share_ctx = NULL;
     IFMUadkShareCtx *cur = NULL;
@@ -155,6 +158,17 @@ IFMUadkShareCtx *get_uadk_ctx(UadkQueueAlgType alg_type, int alg, int mode, bool
         set_br(&aead_setup.br, resource->pool);
 
         ctx = wcrypto_create_aead_ctx(&resource->queue, &aead_setup);
+        if (ctx == NULL) {
+            free(new_share_ctx);
+            return NULL;
+        }
+    } else if (resource->alg_type == IFM_UADK_ALG_RSA) {
+        memset(&aead_setup, 0, sizeof(struct wcrypto_rsa_ctx_setup));
+        rsa_setup.is_crt = alg;
+        rsa_setup.key_bits = mode;
+        set_br(&rsa_setup.br, resource->pool);
+
+        ctx = wcrypto_create_rsa_ctx(&resource->queue, &rsa_setup);
         if (ctx == NULL) {
             free(new_share_ctx);
             return NULL;
@@ -219,6 +233,9 @@ int uadk_resource_init(UadkQueueAlgType alg_type, char* alg_name, IFMUadkAlgMode
         case IFM_UADK_ALG_AEAD:
             pool_setup.block_size = GCM_MAX_BLOCK_SZ;
             break;
+        case IFM_UADK_ALG_RSA:
+            pool_setup.block_size = RSA_MAX_BLOCK_SZ;
+            break;
     }
     pool_setup.block_num = MAX_BLOCK_NM;
     pool_setup.align_size = SQE_SIZE;
@@ -262,6 +279,10 @@ int uadk_init()
         uadk_resource_init(IFM_UADK_ALG_AEAD, "aead", NULL, 0);
         is_init[IFM_UADK_ALG_AEAD] = true;
     }
+    if (!is_init[IFM_UADK_ALG_RSA]) {
+        uadk_resource_init(IFM_UADK_ALG_RSA, "rsa", NULL, 0);
+        is_init[IFM_UADK_ALG_RSA] = true;
+    }
 
     return ret;
 }
@@ -271,6 +292,7 @@ void free_share_opdata(IFMUadkShareOpdata *share_opdata, UadkQueueAlgType alg_ty
     struct wcrypto_digest_op_data *digest_opdata = NULL;
     struct wcrypto_cipher_op_data *cipher_opdata = NULL;
     struct wcrypto_aead_op_data *aead_opdata = NULL;
+    struct wcrypto_rsa_op_data *rsa_opdata = NULL;
 
     if (share_opdata == NULL) {
         return;
@@ -293,6 +315,11 @@ void free_share_opdata(IFMUadkShareOpdata *share_opdata, UadkQueueAlgType alg_ty
                 wd_free_blk(g_resource[alg_type].pool, aead_opdata->in);
                 wd_free_blk(g_resource[alg_type].pool, aead_opdata->out);
                 wd_free_blk(g_resource[alg_type].pool, aead_opdata->iv);
+                break;
+            case IFM_UADK_ALG_RSA:
+                rsa_opdata = (struct wcrypto_rsa_op_data *)share_opdata->opdata;
+                wd_free_blk(g_resource[alg_type].pool, rsa_opdata->in);
+                wd_free_blk(g_resource[alg_type].pool, rsa_opdata->out);
                 break;
         }
         free(share_opdata->opdata);
@@ -332,6 +359,9 @@ void uadk_free()
                 case IFM_UADK_ALG_AEAD:
                     wcrypto_del_aead_ctx(cur_ctx->ctx);
                     break;
+                case IFM_UADK_ALG_RSA:
+                    wcrypto_del_rsa_ctx(cur_ctx->ctx);
+                    break;
                 default:
                     break;
             }
@@ -352,6 +382,7 @@ int alloc_blk(UadkQueueAlgType alg_type, IFMUadkShareOpdata *new_opdata)
     struct wcrypto_digest_op_data *digest_opdata = NULL;
     struct wcrypto_cipher_op_data *cipher_opdata = NULL;
     struct wcrypto_aead_op_data *aead_opdata = NULL;
+    struct wcrypto_rsa_op_data *rsa_opdata = NULL;
 
     switch (alg_type) {
         case IFM_UADK_ALG_DIGEST:
@@ -411,6 +442,21 @@ int alloc_blk(UadkQueueAlgType alg_type, IFMUadkShareOpdata *new_opdata)
                 return -1;
             }
             break;
+        case IFM_UADK_ALG_RSA:
+            rsa_opdata = (struct wcrypto_rsa_op_data *)new_opdata->opdata;
+            rsa_opdata->in = wd_alloc_blk(g_resource[alg_type].pool);
+            if (!(rsa_opdata->in)) {
+                free_share_opdata(new_opdata, alg_type);
+                IFM_ERR("wcrypto_rsa_op_data wd_alloc_blk in failed\n");
+                return -1;
+            }
+            rsa_opdata->out = wd_alloc_blk(g_resource[alg_type].pool);
+            if (!(rsa_opdata->out)) {
+                free_share_opdata(new_opdata, alg_type);
+                IFM_ERR("wcrypto_rsa_op_data wd_alloc_blk out failed\n");
+                return -1;
+            }
+            break;
     }
 
     return 0;
@@ -454,6 +500,10 @@ IFMUadkShareOpdata *get_uadk_opdata(UadkQueueAlgType alg_type)
         case IFM_UADK_ALG_AEAD:
             new_opdata->opdata = malloc(sizeof(struct wcrypto_aead_op_data));
             memset(new_opdata->opdata, 0, sizeof(struct wcrypto_aead_op_data));
+            break;
+        case IFM_UADK_ALG_RSA:
+            new_opdata->opdata = malloc(sizeof(struct wcrypto_rsa_op_data));
+            memset(new_opdata->opdata, 0, sizeof(struct wcrypto_rsa_op_data));
             break;
         default:
             break;
@@ -514,12 +564,25 @@ struct wcrypto_aead_op_data *get_aead_opdata(UadkQueueAlgType alg_type)
     return (struct wcrypto_aead_op_data *)cur_opdata->opdata;
 }
 
+struct wcrypto_rsa_op_data *get_rsa_opdata(UadkQueueAlgType alg_type)
+{
+    IFMUadkShareOpdata *cur_opdata = NULL;
+
+    cur_opdata = get_uadk_opdata(alg_type);
+    if (!cur_opdata) {
+        IFM_ERR("get_rsa_opdata: get_uadk_opdata faild\n");
+        return NULL;
+    }
+    return (struct wcrypto_rsa_op_data *)cur_opdata->opdata;
+}
+
 // 释放一个opdata，只是将标记为设置为未使用
 void free_uadk_opdata(UadkQueueAlgType alg_type, IFMUadkShareOpdata *opdata)
 {
     struct wcrypto_digest_op_data *digest_opdata = NULL;
     struct wcrypto_cipher_op_data *cipher_opdata = NULL;
     struct wcrypto_aead_op_data *aead_opdata = NULL;
+    struct wcrypto_rsa_op_data *rsa_opdata = NULL;
     IFMUadkShareOpdata *cur_opdata = NULL;
 
     if (!opdata) {
@@ -560,6 +623,13 @@ void free_uadk_opdata(UadkQueueAlgType alg_type, IFMUadkShareOpdata *opdata)
                     aead_opdata->priv = 0;
                     aead_opdata->status = 0;
                     break;
+                case IFM_UADK_ALG_RSA:
+                    rsa_opdata = (struct wcrypto_rsa_op_data *)cur_opdata->opdata;
+                    memset(rsa_opdata->in, 0, rsa_opdata->in_bytes);
+                    rsa_opdata->in_bytes = 0;
+                    rsa_opdata->out_bytes = 0;
+                    rsa_opdata->op_type = 0;
+                    rsa_opdata->status = 0;
                 default:
                     break;
             }

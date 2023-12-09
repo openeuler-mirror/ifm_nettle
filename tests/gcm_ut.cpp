@@ -153,6 +153,27 @@ static void gcm_aes256_set_nonce_wrapper (void *ctx, const uint8_t *nonce)
     gcm_aes256_set_iv ((struct ifm_gcm_aes256_ctx *)ctx, GCM_IV_SIZE, nonce);
 }
 
+static nettle_set_key_func gcm_sm4_set_nonce_wrapper;
+static void gcm_sm4_set_nonce_wrapper (void *ctx, const uint8_t *nonce)
+{
+    gcm_sm4_set_iv ((struct ifm_gcm_sm4_ctx *)ctx, GCM_IV_SIZE, nonce);
+}
+
+
+const struct nettle_aead ifm_nettle_gcm_sm4 =
+{ 
+    "ifm_gcm_sm4", sizeof(struct ifm_gcm_sm4_ctx),
+    GCM_BLOCK_SIZE, GCM_SM4_KEY_SIZE,
+    GCM_IV_SIZE, GCM_DIGEST_SIZE,
+    (nettle_set_key_func *) gcm_sm4_set_key,
+    (nettle_set_key_func *) gcm_sm4_set_key,
+    gcm_sm4_set_nonce_wrapper,
+    (nettle_hash_update_func *) gcm_sm4_update,
+    (nettle_crypt_func *) gcm_sm4_encrypt,
+    (nettle_crypt_func *) gcm_sm4_decrypt,
+    (nettle_hash_digest_func *) gcm_sm4_digest,
+};
+
 const struct nettle_aead ifm_nettle_gcm_aes128 =
 { 
     "ifm_gcm_aes128", sizeof(struct ifm_gcm_aes128_ctx),
@@ -490,3 +511,20 @@ TEST(gcm_testcases, test_gcm_19)
 	    SHEX("cafebabefacedbaddecaf888"),
 	    SHEX("796836f1246c9d735c5e1be0a715ccc3"));
 }
+
+// TEST(gcm_testcases, test_gcm_sm4_1)
+// {
+//   	test_aead_gcm(&ifm_nettle_gcm_sm4, NULL,
+// 	    SHEX("0123456789ABCDEFFEDCBA9876543210"),
+// 	    SHEX("FEEDFACEDEADBEEFFEEDFACEDEADBEEFABADDAD2"),
+// 	    SHEX("AAAAAAAAAAAAAAAABBBBBBBBBBBBBBBB"
+// 	         "CCCCCCCCCCCCCCCCDDDDDDDDDDDDDDDD"
+// 	         "EEEEEEEEEEEEEEEEFFFFFFFFFFFFFFFF"
+// 	         "EEEEEEEEEEEEEEEEAAAAAAAAAAAAAAAA"),
+// 	    SHEX("17F399F08C67D5EE19D0DC9969C4BB7D"
+// 	         "5FD46FD3756489069157B282BB200735"
+// 	         "D82710CA5C22F0CCFA7CBF93D496AC15"
+// 	         "A56834CBCF98C397B4024A2691233B8D"),
+// 	    SHEX("00001234567800000000ABCD"),
+// 	    SHEX("83DE3541E4C2B58177E065A9BF7B62EC"));
+// }

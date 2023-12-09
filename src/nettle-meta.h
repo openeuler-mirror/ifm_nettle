@@ -33,10 +33,12 @@ extern "C" {
 #define nettle_aes128 ifm_nettle_aes128
 #define nettle_aes192 ifm_nettle_aes192
 #define nettle_aes256 ifm_nettle_aes256
+#define nettle_sm4 ifm_nettle_sm4
 
 extern const struct nettle_cipher nettle_aes128;
 extern const struct nettle_cipher nettle_aes192;
 extern const struct nettle_cipher nettle_aes256;
+extern const struct nettle_cipher nettle_sm4;
 
 #ifdef __cplusplus
 }

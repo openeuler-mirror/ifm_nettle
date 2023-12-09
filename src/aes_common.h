@@ -27,26 +27,9 @@
 #ifdef __aarch64__
 #include "uadk_meta.h"
 #include "aes_meta.h"
+#include "cipher.h"
 
 // 如下公共函数在aes.c中实现
-int uadk_aes_init(struct uadk_cipher_st *uadk_ctx);
-int alloc_uadk(struct uadk_cipher_st *uadk_ctx, bool force, enum wcrypto_cipher_mode mode);
-void free_cipher_uadk(struct uadk_cipher_st *uadk_ctx);
-void uadk_aes_do_cipher(struct uadk_cipher_st *uadk_ctx,
-                        uint8_t *iiv,
-                        uint8_t *dst,
-                        const uint8_t *src,
-                        size_t length,
-                        bool encrypt);
-int uadk_aes_set_key(struct uadk_cipher_st *uadk_ctx,
-                     const uint8_t *uadk_key,
-                     uint16_t key_len);
-void uadk_aes_do_cipher(struct uadk_cipher_st *uadk_ctx,
-                        uint8_t *iiv,
-                        uint8_t *dst,
-                        const uint8_t *src,
-                        size_t length,
-                        bool encrypt);
 void ifm_aes128_encrypt(const struct ifm_aes128_ctx *ctx, size_t length, uint8_t *dst, const uint8_t *src);
 void ifm_aes192_encrypt(const struct ifm_aes192_ctx *ctx, size_t length, uint8_t *dst, const uint8_t *src);
 void ifm_aes256_encrypt(const struct ifm_aes256_ctx *ctx, size_t length, uint8_t *dst, const uint8_t *src);

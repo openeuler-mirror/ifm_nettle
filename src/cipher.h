@@ -1,10 +1,10 @@
 /******************************************************************************
- * gcrypt_sha2_meta.h: meta for gcry_uadk_sha2
+ * This file is an internal include file for nettle
  *
  * Copyright (c) Huawei Technologies Co., Ltd. 2020. All rights reserved.
  *
  * Authors:
- * xinghailiao <xinghailiao@smail.xtu.edu.cn>
+ * Shankang Ke <shankang@isrc.iscas.ac.cn>
  *
  * This library is free software; you can redistribute it and/or
  * modify it under the terms of the GNU Lesser General Public
@@ -20,51 +20,27 @@
  * License along with this library; if not, write to the Free Software
  * Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA  02110-1301  USA
  ********************************************************************************/
-#ifndef GCRY_UADK_SHA2_META_INCLUDED
-#define GCRY_UADK_SHA2_META_INCLUDED
 
-#include <gcrypt.h>
-#include "uadk_meta.h"
+#ifndef IFM_NETTLE_CIPHER_H_IN_INCLUDED
+#define IFM_NETTLE_CIPHER_H_IN_INCLUDED
 
 #ifdef __aarch64__
-#include "uadk/v1/wd.h"
-#include "uadk/v1/wd_bmm.h"
-#include "uadk/v1/wd_digest.h"
-#endif
+#include "aes_meta.h"
+#include "uadk_meta.h"
 
 #ifdef __cplusplus
 extern "C" {
 #endif
-
-#ifdef __aarch64__
-#define SHA256_DIGEST_SIZE 32
-#define SHA224_DIGEST_SIZE 28
-#define SHA512_DIGEST_SIZE 64
-#define SHA384_DIGEST_SIZE 48
-#define SM3_DIGEST_SIZE 32
-#define MAX_HMAC_KEY_SIZE 128
-struct gcrypt_digest_struct {
-    struct uadk_digest_st uadk_ctx;
-    enum gcry_md_algos alg;
-};
-#endif
-
-typedef struct gcry_uadk_md_hd {
-    gcry_md_hd_t gcry_hd_t;
-
-#ifdef __aarch64__
-    int ctx_len;
-    struct gcrypt_digest_struct alg_ctx[5];    /* gcrypt中每种alg的ctx对象，因为gcrypt中可能存在同时配置多种算法的场景 */
-    bool use_uadk;
-    bool use_gcry;
-    void *key;
-    size_t keylen;
-    uint8_t mode;
-#endif
-} *gcry_uadk_md_hd_t;
-
+// 如下公共函数在aes.c中实现
+int uadk_cipher_init(struct uadk_cipher_st *uadk_ctx);
+int alloc_uadk(struct uadk_cipher_st *uadk_ctx, bool force, enum wcrypto_cipher_mode mode);
+void free_cipher_uadk(struct uadk_cipher_st *uadk_ctx);
+int uadk_cipher_set_key(struct uadk_cipher_st *uadk_ctx, const uint8_t *uadk_key, uint16_t key_len);
+void uadk_do_cipher(struct uadk_cipher_st *uadk_ctx, uint8_t *iiv, uint8_t *dst, const uint8_t *src, size_t length,
+                    bool encrypt);
 #ifdef __cplusplus
 }
 #endif
-
 #endif
+
+#endif /* IFM_NETTLE_CIPHER_H_IN_INCLUDED */

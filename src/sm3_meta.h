@@ -1,5 +1,5 @@
 /******************************************************************************
- * ifm_nettle-hmac_meta.h: meta for hmac
+ * ifm_nettle-sm3_meta.h: meta for sm3
  *
  * Copyright (c) Huawei Technologies Co., Ltd. 2020. All rights reserved.
  *
@@ -25,6 +25,16 @@
 
 #include <stdint.h>
 
+#ifdef __aarch64__
+#include "uadk_meta.h"
+#include "uadk/v1/wd_bmm.h"
+#include "uadk/v1/wd_digest.h"
+#endif
+
+#ifdef __cplusplus
+extern "C" {
+#endif
+
 #define SM3_DIGEST_SIZE 32
 #define SM3_BLOCK_SIZE 64
 
@@ -36,7 +46,16 @@ struct ifm_sm3_ctx {
     uint64_t count;               /* Block count */
     unsigned index;               /* Into buffer */
     uint8_t block[SM3_BLOCK_SIZE]; /* Block buffer */
+
+#ifdef __aarch64__
+    struct uadk_digest_st uadk_ctx;
+    bool use_uadk;
+#endif
 };
 
+
+#ifdef __cplusplus
+}
+#endif
 
 #endif // IFM_NETTLE_SM3_META_H

@@ -53,7 +53,7 @@
  * @param algo 待添加的算法
  * @return
  */
-gcry_error_t uadk_md_enable(gcry_uadk_sha2_hd_t hd, enum gcry_md_algos algo) {
+gcry_error_t uadk_md_enable(gcry_uadk_md_hd_t hd, enum gcry_md_algos algo) {
     IFMUadkShareCtx *p_share_ctx = NULL;
     enum wcrypto_digest_alg uadk_alg;
     for (int i = 0; i < hd->ctx_len; i++) {
@@ -73,6 +73,9 @@ gcry_error_t uadk_md_enable(gcry_uadk_sha2_hd_t hd, enum gcry_md_algos algo) {
             break;
         case GCRY_MD_SHA512:
             uadk_alg = WCRYPTO_SHA512;
+            break;
+        case GCRY_MD_SM3:
+            uadk_alg = WCRYPTO_SM3;
             break;
         default:
             IFM_ERR("uadk_md_enable algo is invalid\n");
@@ -99,7 +102,7 @@ gcry_error_t uadk_md_enable(gcry_uadk_sha2_hd_t hd, enum gcry_md_algos algo) {
  * @param flags 设置计算hash的模式，HMAC模式或普通模式
  * @return
  */
-gcry_error_t uadk_md_open(gcry_uadk_sha2_hd_t *hd, int algo, unsigned int flags) {
+gcry_error_t uadk_md_open(gcry_uadk_md_hd_t *hd, int algo, unsigned int flags) {
     (*hd)->key = NULL;
     (*hd)->keylen = 0;
     (*hd)->ctx_len = 0;
@@ -116,7 +119,7 @@ gcry_error_t uadk_md_open(gcry_uadk_sha2_hd_t *hd, int algo, unsigned int flags)
  * 适配libgcrypt中的gcry_md_close函数，释放hd中的资源
  * @param hd 待释放资源的hd
  */
-void uadk_md_close(gcry_uadk_sha2_hd_t hd) {
+void uadk_md_close(gcry_uadk_md_hd_t hd) {
     for (int i = 0; i < hd->ctx_len; i++) {
         free_uadk_opdata(IFM_UADK_ALG_DIGEST, hd->alg_ctx[i].uadk_ctx.p_share_opdata);
         hd->alg_ctx[i].uadk_ctx.p_share_opdata = NULL;
@@ -143,6 +146,9 @@ int get_size_by_alg(enum gcry_md_algos alg) {
         case GCRY_MD_SHA512:
             out_bytes_size = SHA512_DIGEST_SIZE;
             break;
+        case GCRY_MD_SM3:
+            out_bytes_size = SM3_DIGEST_SIZE;
+            break;
         default:
             out_bytes_size = 0;
             IFM_ERR("[%s] alg %d is not support, please check the alg is correct or not\n", \
@@ -159,7 +165,7 @@ int get_size_by_alg(enum gcry_md_algos alg) {
  * @param data 写入的数据
  * @param length 数据长度
  */
-void uadk_md_write(gcry_uadk_sha2_hd_t hd, const void *data, size_t length) {
+void uadk_md_write(gcry_uadk_md_hd_t hd, const void *data, size_t length) {
     if (NULL == data || 0 >= length) {
         return;
     }
@@ -217,7 +223,7 @@ void uadk_md_write(gcry_uadk_sha2_hd_t hd, const void *data, size_t length) {
  * @param algo
  * @return
  */
-unsigned char *uadk_md_read(gcry_uadk_sha2_hd_t hd, int algo) {
+unsigned char *uadk_md_read(gcry_uadk_md_hd_t hd, int algo) {
     for (int i = 0; i < hd->ctx_len; i++) {
         if (hd->alg_ctx[i].alg == algo) {
             if (hd->use_uadk && \
@@ -241,7 +247,7 @@ unsigned char *uadk_md_read(gcry_uadk_sha2_hd_t hd, int algo) {
  * @param keylen
  * @return
  */
-gcry_error_t uadk_md_setkey(gcry_uadk_sha2_hd_t hd, const void *key, size_t keylen) {
+gcry_error_t uadk_md_setkey(gcry_uadk_md_hd_t hd, const void *key, size_t keylen) {
     gcry_error_t ret = 0;
     if (!hd->key) {
         hd->key = malloc(sizeof(u_int8_t)*(MAX_HMAC_KEY_SIZE));
@@ -268,9 +274,9 @@ gcry_error_t uadk_md_setkey(gcry_uadk_sha2_hd_t hd, const void *key, size_t keyl
  * @param src 原hd
  * @return
  */
-gcry_error_t uadk_md_copy(gcry_uadk_sha2_hd_t *dst, gcry_uadk_sha2_hd_t src) {
+gcry_error_t uadk_md_copy(gcry_uadk_md_hd_t *dst, gcry_uadk_md_hd_t src) {
     gcry_error_t ret = 0;
-    (*dst) = malloc(sizeof(struct gcry_uadk_sha2_hd));
+    (*dst) = malloc(sizeof(struct gcry_uadk_md_hd));
     if (!(*dst)) {
         return 1;
     }
@@ -325,7 +331,7 @@ gcry_error_t uadk_md_copy(gcry_uadk_sha2_hd_t *dst, gcry_uadk_sha2_hd_t src) {
  * 适配libgcrypt中的gcry_md_reset函数，重置hd中的uadk结构体的opdata数据
  * @param hd
  */
-void uadk_md_reset(gcry_uadk_sha2_hd_t hd) {
+void uadk_md_reset(gcry_uadk_md_hd_t hd) {
     for (int i = 0; i < hd->ctx_len; i++) {
         free_uadk_opdata(IFM_UADK_ALG_DIGEST, hd->alg_ctx[i].uadk_ctx.p_share_opdata);
         hd->alg_ctx[i].uadk_ctx.p_share_opdata = NULL;
@@ -335,14 +341,14 @@ void uadk_md_reset(gcry_uadk_sha2_hd_t hd) {
 #endif
 
 // 创建一个算法摘要算法由algo指定，存储到hd，如果创建失败，则ctx为NULL。
-gcry_error_t gcry_uadk_md_open(gcry_uadk_sha2_hd_t *hd, int algo, unsigned int flags) {
+gcry_error_t gcry_uadk_md_open(gcry_uadk_md_hd_t *hd, int algo, unsigned int flags) {
 #ifdef __aarch64__
     gcry_error_t ret = 0;
-    gcry_uadk_sha2_hd_t h = malloc(sizeof(struct gcry_uadk_sha2_hd));
+    gcry_uadk_md_hd_t h = malloc(sizeof(struct gcry_uadk_md_hd));
     if (NULL == h) {
         return 1;
     }
-    memset(h, 0, sizeof(struct gcry_uadk_sha2_hd));
+    memset(h, 0, sizeof(struct gcry_uadk_md_hd));
     *hd = h;
 
     ret = gcry_md_open(&((*hd)->gcry_hd_t), algo, flags);
@@ -351,7 +357,7 @@ gcry_error_t gcry_uadk_md_open(gcry_uadk_sha2_hd_t *hd, int algo, unsigned int f
                 __func__, ret);
         return ret;
     }
-    if (UadkEnabled() == false || (algo != GCRY_MD_SHA224 && algo != GCRY_MD_SHA256)) {
+    if (UadkEnabled() == false || (algo != GCRY_MD_SHA224 && algo != GCRY_MD_SHA256 && algo != GCRY_MD_SM3)) {
         (*hd)->use_uadk = false;
         return ret;
     }
@@ -364,20 +370,20 @@ gcry_error_t gcry_uadk_md_open(gcry_uadk_sha2_hd_t *hd, int algo, unsigned int f
     }
     return 0;
 #else
-    gcry_uadk_sha2_hd_t h = malloc(sizeof(struct gcry_uadk_sha2_hd));
+    gcry_uadk_md_hd_t h = malloc(sizeof(struct gcry_uadk_md_hd));
     if (NULL == h) {
         return 1;
     }
-    memset(h, 0, sizeof(struct gcry_uadk_sha2_hd));
+    memset(h, 0, sizeof(struct gcry_uadk_md_hd));
     *hd = h;
     return gcry_md_open(&((*hd)->gcry_hd_t), algo, flags);
 #endif
 }
 
-gcry_error_t gcry_uadk_md_enable(gcry_uadk_sha2_hd_t hd, int algo) {
+gcry_error_t gcry_uadk_md_enable(gcry_uadk_md_hd_t hd, int algo) {
 #ifdef __aarch64__
     if (hd->use_uadk) {
-        if (algo != GCRY_MD_SHA224 && algo != GCRY_MD_SHA256) {
+        if (algo != GCRY_MD_SHA224 && algo != GCRY_MD_SHA256 && algo != GCRY_MD_SM3) {
             if (false == hd->use_gcry) {
                 hd->use_gcry = true;
             }
@@ -393,7 +399,7 @@ gcry_error_t gcry_uadk_md_enable(gcry_uadk_sha2_hd_t hd, int algo) {
 }
 
 // 设置key
-gcry_error_t gcry_uadk_md_setkey(gcry_uadk_sha2_hd_t hd, const void *key, size_t keylen) {
+gcry_error_t gcry_uadk_md_setkey(gcry_uadk_md_hd_t hd, const void *key, size_t keylen) {
 #ifdef __aarch64__
     if (hd->use_uadk) {
         gcry_error_t ret = 0;
@@ -428,7 +434,7 @@ gcry_error_t gcry_uadk_md_setkey(gcry_uadk_sha2_hd_t hd, const void *key, size_t
 }
 
 // 更新消息摘要。
-void gcry_uadk_md_write(gcry_uadk_sha2_hd_t hd, const void *buffer, size_t length) {
+void gcry_uadk_md_write(gcry_uadk_md_hd_t hd, const void *buffer, size_t length) {
 #ifdef __aarch64__
     if (hd->use_uadk) {
         uadk_md_write(hd, buffer, length);
@@ -443,7 +449,7 @@ void gcry_uadk_md_write(gcry_uadk_sha2_hd_t hd, const void *buffer, size_t lengt
 #endif
 }
 
-unsigned char *gcry_uadk_md_read(gcry_uadk_sha2_hd_t hd, int algo)
+unsigned char *gcry_uadk_md_read(gcry_uadk_md_hd_t hd, int algo)
 {
 #ifdef __aarch64__
     if (hd->use_uadk) {
@@ -456,7 +462,7 @@ unsigned char *gcry_uadk_md_read(gcry_uadk_sha2_hd_t hd, int algo)
 #endif
 }
 
-void gcry_uadk_md_close(gcry_uadk_sha2_hd_t hd)
+void gcry_uadk_md_close(gcry_uadk_md_hd_t hd)
 {
 #ifdef __aarch64__
     if (NULL == hd) {
@@ -477,7 +483,7 @@ void gcry_uadk_md_close(gcry_uadk_sha2_hd_t hd)
 #endif
 }
 
-gcry_error_t gcry_uadk_md_copy(gcry_uadk_sha2_hd_t *dst, gcry_uadk_sha2_hd_t src) {
+gcry_error_t gcry_uadk_md_copy(gcry_uadk_md_hd_t *dst, gcry_uadk_md_hd_t src) {
 #ifdef __aarch64__
     if (src->use_uadk) {
         gcry_error_t ret = uadk_md_copy(dst, src);
@@ -499,7 +505,7 @@ gcry_error_t gcry_uadk_md_copy(gcry_uadk_sha2_hd_t *dst, gcry_uadk_sha2_hd_t src
 #endif
 }
 
-void gcry_uadk_md_reset(gcry_uadk_sha2_hd_t hd) {
+void gcry_uadk_md_reset(gcry_uadk_md_hd_t hd) {
 #ifdef __aarch64__
     if (hd->use_uadk) {
         uadk_md_reset(hd);

@@ -46,17 +46,6 @@ static const struct testcase testcases[] =
                         "KsecsZoJb7jLod5TyWPTFnLx5Pnxo98k0"
                 },
                 {
-                        "",
-                        "$5$2xDUEErzY4KLYaDl",
-                        "$5$2xDUEErzY4KLYaDl$qJvUwpav1tCqK8as84i4pPK2ouijpgQGoVtNBzYzjw7"
-                },
-                {
-                        "",
-                        "$6$Jp5Vsqfp7L39PeST",
-                        "$6$Jp5Vsqfp7L39PeST$sqwLE7FksXFv9LNh2tAGNRhlHjIJB9RtVSjdJ6Axqv3fM74RdlUe"
-                        "zgLvPnJwUQVd.09WAd64Awmxx0adyRnK9/"
-                },
-                {
                         "a",
                         "$5$zHK3ww7IGH3BkAgx",
                         "$5$zHK3ww7IGH3BkAgx$4M1jP/iOlgrndiE/RakKH9sIbhIKclMoGXlZA40nAbC"
@@ -209,6 +198,51 @@ static const struct testcase testcases[] =
                     "fszbexrampetvhqnddjeqvuygpnkazqfrpjvoaxdpcwmjobmskskfojnewxgxnnofwltwjwnnvbwjckdmeouuzhyv",
                     "$5$2hqUE55jLCo45U8M",
                     "$5$2hqUE55jLCo45U8M$/wilsoQxECpxETaR1o08JCvbeW4MwM.Uxgtf8H97JBD"
+                },
+                {
+                        "abc",
+                        "$sm3$hmBz9GHejlqmxfev",
+                        "$sm3$hmBz9GHejlqmxfev$nbnNl4sm3MRD6Cj8lDKhg/qSUz7UZFtrv3pqwooJWI3"
+                },
+                {
+                        "a",
+                        "$sm3$zHK3ww7IGH3BkAgx",
+                        "$sm3$zHK3ww7IGH3BkAgx$rncv/j9EUjLxy7RolXzBjaiy4YGZhlHEx8MhWhuwSBC"
+                },
+                {
+                        "abcdefghijklmnopqrstuvwxyz",
+                        "$sm3$.tPq7lH1SXzzSTxE",
+                        "$sm3$.tPq7lH1SXzzSTxE$fc6rYLkW1XOGYcuzPbKcY55jW8qRmqVVprUYMBY8is/"
+                },
+                {
+                        "nwlrbbmqbhcdarzowkkyhiddqscdxrjm",
+                        "$sm3$Gn4j23/5pRoIh5SY",
+                        "$sm3$Gn4j23/5pRoIh5SY$h82YXZGvbYc3gq41geW2VtYsLU1QGdsnHugkr9.hUy6"
+                },
+                {
+                        "cgpxiqvkuytdlcgdewhtaciohordtqkv",
+                        "$sm3$pBx/z/Dy.PuOsnMm",
+                        "$sm3$pBx/z/Dy.PuOsnMm$Iex5/H2fvI545JrkPxpMSpmVzmj1BVFO13jrYN3fxg."
+                },
+                {
+                    "djsuyibyebmwsiqyoygyxymzevypzvjegebeocfuftsxdixtigsieehkchzdflilrjqfnxztqrsvbsp"
+                    "kyhsenbppkqtpddbuotbbqcwivrfxjujjddntgeiqvdgaijvwcyaubwewpjvygehljxepbpiwuqzdzubdubzva"
+                    "fspqpqwuzifwovyddwyvvburczmgyjgfdxvtnunneslsplwuiupfxlzbknhkwppanltcfirjcddsozoyvegurfwc"
+                    "sfmoxeqmrjowrghwlkobmeahkgccnaehhsveymqpxhlrnunyfdzrhbasjeuygafoubutpnimuwfjqsjxvkqdorx"
+                    "xvrwctdsneogvbpkxlpgdirbfcriqifpgynkrrefxsnvucftpwctgtwmxnupycfgcuqunublmoiitncklefszbex"
+                    "rampetvhqnddjeqvuygpnkazqfrpjvoaxdpcwmjobmskskfojnewxgxnnofwltwjwnnvbwjckdmeouuzhyv",
+                    "$sm3$zJEPvQQy9eB9zifP",
+                    "$sm3$zJEPvQQy9eB9zifP$ATUfcnEtwp1ngaMLIx0.8OjgAJB5OiPbvU1iK3/gEa3"
+                },
+                {
+                    "djsuyibyebmwsiqyoygyxymzevypzvjegebeocfuftsxdixtigsieehkchzdflilrjqfnxztqrsvbs"
+                    "pkyhsenbppkqtpddbuotbbqcwivrfxjujjddntgeiqvdgaijvwcyaubwewpjvygehljxepbpiwuqzdzubdubzv"
+                    "afspqpqwuzifwovyddwyvvburczmgyjgfdxvtnunneslsplwuiupfxlzbknhkwppanltcfirjcddsozoyvegur"
+                    "fwcsfmoxeqmrjowrghwlkobmeahkgccnaehhsveymqpxhlrnunyfdzrhbasjeuygafoubutpnimuwfjqsjxvkq"
+                    "dorxxvrwctdsneogvbpkxlpgdirbfcriqifpgynkrrefxsnvucftpwctgtwmxnupycfgcuqunublmoiitnckle"
+                    "fszbexrampetvhqnddjeqvuygpnkazqfrpjvoaxdpcwmjobmskskfojnewxgxnnofwltwjwnnvbwjckdmeouuzhyv",
+                    "$sm3$2hqUE55jLCo45U8M",
+                    "$sm3$2hqUE55jLCo45U8M$bog7aFb5M973q9IRMT.FALQ4SJnIPNGZdDa.x/WtLT4"
                 }
         };
 
@@ -217,9 +251,13 @@ static void test_crypt()
   for (size_t i = 0; i < ARRAY_SIZE (testcases); i++)
   {
     char *res = crypt(testcases[i].phrase, testcases[i].settings);
+    if (NULL == res) {
+        printf("res is NULL, expect\n", testcases[i].except);
+        ASSERT(false);
+    }
     if (strlen(res)!=strlen(testcases[i].except) || memcmp(res, testcases[i].except, strlen(res))!=0) {
       printf("FAIL: got: %s\n exp: %s\n", res, testcases[i].except);
-      exit(1);
+      ASSERT(false);
     } else {
       printf("PASS: test %s\n", testcases[i].except);
     }

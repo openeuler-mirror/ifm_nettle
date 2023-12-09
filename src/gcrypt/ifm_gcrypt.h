@@ -107,27 +107,27 @@ gpg_error_t ifm_gcry_cipher_setctr(gcry_uadk_aes_hd_t hd, const void *ctr, size_
    given as an bitwise OR of the gcry_md_flags values.  ALGO may be
    given as 0 if the algorithms to be used are later set using
    gcry_md_enable. */
-gcry_error_t ifm_gcry_md_open(gcry_uadk_sha2_hd_t *h, int algo, unsigned int flags);
+gcry_error_t ifm_gcry_md_open(gcry_uadk_md_hd_t *h, int algo, unsigned int flags);
 
 /* Retrieve various information about the algorithm ALGO. */
 gcry_error_t ifm_gcry_md_algo_info(int algo, int what, void *buffer, size_t *nbytes);
 
-gcry_error_t ifm_gcry_md_enable(gcry_uadk_sha2_hd_t hd, int algo);
+gcry_error_t ifm_gcry_md_enable(gcry_uadk_md_hd_t hd, int algo);
 
-void ifm_gcry_md_write(gcry_uadk_sha2_hd_t hd, const void *buffer, size_t length);
+void ifm_gcry_md_write(gcry_uadk_md_hd_t hd, const void *buffer, size_t length);
 
-gcry_err_code_t ifm_gcry_md_copy(gcry_uadk_sha2_hd_t *src, gcry_uadk_sha2_hd_t dst);
+gcry_err_code_t ifm_gcry_md_copy(gcry_uadk_md_hd_t *src, gcry_uadk_md_hd_t dst);
 
-void ifm_gcry_md_reset(gcry_uadk_sha2_hd_t hd);
+void ifm_gcry_md_reset(gcry_uadk_md_hd_t hd);
 
-unsigned char *ifm_gcry_md_read(gcry_uadk_sha2_hd_t hd, int algo);
+unsigned char *ifm_gcry_md_read(gcry_uadk_md_hd_t hd, int algo);
 
-void ifm_gcry_md_close(gcry_uadk_sha2_hd_t hd);
+void ifm_gcry_md_close(gcry_uadk_md_hd_t hd);
 
 void ifm_gcry_md_hash_buffer(int algo, void *digest,
                              const void *buffer, size_t length);
 
-gcry_error_t ifm_gcry_md_setkey(gcry_uadk_sha2_hd_t hd, const void *key, size_t keylen);
+gcry_error_t ifm_gcry_md_setkey(gcry_uadk_md_hd_t hd, const void *key, size_t keylen);
 
 /************************************
  *                                  *

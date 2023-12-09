@@ -22,11 +22,13 @@
 
 set(check_incs
     ${LIBNETTLE_INCLUDE_DIR}
+    ${OPENSSL_INCLUDE_DIR}
     )
 
 set(check_nettle_libs
     ${LIBNETTLE_LIBRARY}
     ${LIBWD_LIBRARY}
+    ${OPENSSL_LIBRARY}
     )
 
 set(check_libgcrypt_libs
@@ -47,8 +49,9 @@ list(REMOVE_DUPLICATES check_incs)
 list(REMOVE_DUPLICATES check_nettle_libs)
 
 # get top source files
-aux_source_directory(${CMAKE_CURRENT_SOURCE_DIR} topsrcs)
-list(REMOVE_ITEM topsrcs "${CMAKE_CURRENT_SOURCE_DIR}/utils.c")
+#aux_source_directory(${CMAKE_CURRENT_SOURCE_DIR} topsrcs)
+file(GLOB topsrcs "${CMAKE_CURRENT_SOURCE_DIR}/*.c" 
+    "${CMAKE_CURRENT_SOURCE_DIR}/nettle_src/*.c")
 message("--  Get top srcs: " ${topsrcs})
 
 if (ENABLE_LIBIFM_NETTLE)
@@ -58,6 +61,7 @@ if (ENABLE_LIBIFM_NETTLE)
     set(libifm_nettle_incs
         ${CMAKE_CURRENT_SOURCE_DIR}
         ${CMAKE_BINARY_DIR}/conf
+        ${CMAKE_BINARY_DIR}/nettle_src
         ${check_incs}
     )
 

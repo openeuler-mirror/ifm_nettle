@@ -59,6 +59,13 @@ extern "C" {
 #define gcm_aes256_decrypt ifm_gcm_aes256_decrypt
 #define gcm_aes256_digest ifm_gcm_aes256_digest
 
+#define gcm_sm4_set_key ifm_gcm_sm4_set_key
+#define gcm_sm4_set_iv ifm_gcm_sm4_set_iv
+#define gcm_sm4_update ifm_gcm_sm4_update
+#define gcm_sm4_encrypt ifm_gcm_sm4_encrypt
+#define gcm_sm4_decrypt ifm_gcm_sm4_decrypt
+#define gcm_sm4_digest ifm_gcm_sm4_digest
+
 void ifm_gcm_set_key(struct ifm_gcm_key *key, const void *cipher, ifm_cipher_func *f);
 void ifm_gcm_set_iv(struct ifm_gcm_ctx *ctx, const struct ifm_gcm_key *key, size_t length, const uint8_t *iv);
 void ifm_gcm_update(struct ifm_gcm_ctx *ctx, const struct ifm_gcm_key *key, size_t length, const uint8_t *data);
@@ -89,6 +96,13 @@ void ifm_gcm_aes256_set_iv(struct ifm_gcm_aes256_ctx *ctx, size_t length, const 
 void ifm_gcm_aes256_encrypt(struct ifm_gcm_aes256_ctx *ctx, size_t length, uint8_t *dst, const uint8_t *src);
 void ifm_gcm_aes256_decrypt(struct ifm_gcm_aes256_ctx *ctx, size_t length, uint8_t *dst, const uint8_t *src);
 void ifm_gcm_aes256_digest(struct ifm_gcm_aes256_ctx *ctx, size_t length, uint8_t *digest);
+
+void ifm_gcm_sm4_set_key(struct ifm_gcm_sm4_ctx *ctx, const uint8_t *key);
+void ifm_gcm_sm4_update(struct ifm_gcm_sm4_ctx *ctx, size_t length, const uint8_t *data);
+void ifm_gcm_sm4_set_iv(struct ifm_gcm_sm4_ctx *ctx, size_t length, const uint8_t *iv);
+void ifm_gcm_sm4_encrypt(struct ifm_gcm_sm4_ctx *ctx, size_t length, uint8_t *dst, const uint8_t *src);
+void ifm_gcm_sm4_decrypt(struct ifm_gcm_sm4_ctx *ctx, size_t length, uint8_t *dst, const uint8_t *src);
+void ifm_gcm_sm4_digest(struct ifm_gcm_sm4_ctx *ctx, size_t length, uint8_t *digest);
 
 #ifdef __cplusplus
 }

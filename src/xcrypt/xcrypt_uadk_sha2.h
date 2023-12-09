@@ -50,6 +50,14 @@ struct ifm_sha512_buffer {
     bool use_uadk;
 };
 
+struct ifm_sm3_buffer {
+    uint8_t result[32];
+    uint8_t p_bytes[32];
+    uint8_t s_bytes[32];
+    struct uadk_digest_st uadk_ctx; /* UADK相关的结构体数据 */
+    bool use_uadk;
+};
+
 int update_recycled (struct uadk_digest_st *uadk_ctx, size_t length, const uint8_t *data, int blocksize);
 int sha2crypt(const char *phrase, size_t phr_size, const char *setting, size_t set_size,
               uint8_t *output, size_t out_size, void *scratch, size_t scr_size, int algo);

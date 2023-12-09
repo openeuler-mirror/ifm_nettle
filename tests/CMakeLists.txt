@@ -22,6 +22,7 @@
 
 enable_testing()
 find_package(GTest REQUIRED)
+find_package(OpenSSL REQUIRED)
 
 macro(_DEFINE_NEW_TEST)
     add_executable(${ARGV0}
@@ -33,6 +34,8 @@ macro(_DEFINE_NEW_TEST)
 
     target_link_libraries(${ARGV0}
         ${GTEST_LIBRARY}
+        OpenSSL::SSL
+        OpenSSL::Crypto
         pthread
         libifm_nettle
         libifm_libgcrypt
@@ -84,6 +87,7 @@ _DEFINE_NEW_TEST(aes_ut aes_testcases)
 _DEFINE_NEW_TEST(aes_keywrap_ut aes_keywrap_testcases)
 _DEFINE_NEW_TEST(cbc_ut cbc_testcases)
 _DEFINE_NEW_TEST(gcm_ut gcm_testcases)
+_DEFINE_NEW_TEST(sm4_ut sm4_testcases)
 _DEFINE_NEW_TEST(rsa_ut rsa_testcases)
 _DEFINE_NEW_TEST(hmac_ut hmac_testcases)
 _DEFINE_NEW_TEST(xcrypt_basic_ut xcrypt_basic_testcases)
@@ -108,7 +112,7 @@ target_link_libraries(mock_ut
 add_dependencies(mock_ut sm3_ut md5_ut sha224_ut sha256_ut sha384_ut sha512_ut 
                 sha512_224_ut sha512_256_ut aes_ut 
                 gcrypt_md_ut gcrypt_pk_ut gcrypt_basic_ut gcrypt_basic_cipher_ut
-                aes_keywrap_ut cbc_ut gcm_ut rsa_ut xcrypt_basic_ut 
+                aes_keywrap_ut cbc_ut gcm_ut sm4_ut rsa_ut xcrypt_basic_ut 
                 hmac_ut hv2ev_ut verto_ut)
 
 # gcrypt benchmark

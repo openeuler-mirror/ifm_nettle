@@ -26,11 +26,15 @@
  * 1. 不支持数据分段处理，因此最大的数据只支持16M，使用 MAX_CIPHER_LENGTH 进行限制。
  * 2. 只支持GCRY_CIPHER_MODE_ECB，GCRY_CIPHER_MODE_CBC，GCRY_CIPHER_MODE_XTS，GCRY_CIPHER_MODE_OFB四种模式
  * 3. uadk没有flag这种参数，因此只能支持CBC模式下flag=0的情况
-*/
+ *
+ * SM4约束
+ * 1. 当前V2只支持CBC和ECB
+ */
 
+#include "gcry_uadk_aes.h"
 #include <gcrypt.h>
 #include "../ifm_utils.h"
-#include "gcry_uadk_aes.h"
+
 
 #ifdef __aarch64__
 #include "uadk/v1/wd.h"
@@ -93,6 +97,8 @@ gcry_error_t uadk_aes_open(gcry_uadk_aes_hd_t *h, int algo, int mode, unsigned i
     // 当前只支持如下3中算法
     if (algo == GCRY_CIPHER_AES || algo == GCRY_CIPHER_AES192 || algo == GCRY_CIPHER_AES256) {
         uadk_cipher_alg = WCRYPTO_CIPHER_AES;
+    } else if (algo == GCRY_CIPHER_SM4) {
+        uadk_cipher_alg = WCRYPTO_CIPHER_SM4;
     } else {
         IFM_ERR("[%s] algo [%d] is invalid\n", __func__, algo);
         return -1;
@@ -100,7 +106,7 @@ gcry_error_t uadk_aes_open(gcry_uadk_aes_hd_t *h, int algo, int mode, unsigned i
 
     p_share_ctx = get_uadk_ctx(IFM_UADK_ALG_CIPHER, uadk_cipher_alg, uadk_aes_mode, false);
     if (p_share_ctx == NULL) {
-        IFM_ERR("[%s] uadk_aes_init get_uadk_ctx failed\n", __func__);
+        IFM_ERR("[%s] uadk_cipher_init get_uadk_ctx failed\n", __func__);
         return -1;
     }
     hd->uadk_ctx.ctx = p_share_ctx->ctx;
@@ -124,7 +130,7 @@ gcry_error_t uadk_aes_setkey(gcry_uadk_aes_hd_t hd, const void *key, size_t keyl
         return -1;
     }
     if (!hd->key) {
-        hd->key = malloc(sizeof(u_int8_t)*(MAX_KEY_SIZE));
+        hd->key = malloc(sizeof(u_int8_t) * (MAX_KEY_SIZE));
         if (hd->key == NULL) {
             IFM_ERR("[%s] malloc key failed\n", __func__);
             // 失败时无需释放资源，由上层调用close释放
@@ -133,7 +139,7 @@ gcry_error_t uadk_aes_setkey(gcry_uadk_aes_hd_t hd, const void *key, size_t keyl
     }
     hd->keylen = keylen;
     memcpy(hd->key, key, hd->keylen);
-    ret =  wcrypto_set_cipher_key(hd->uadk_ctx.ctx, hd->key, hd->keylen);
+    ret = wcrypto_set_cipher_key(hd->uadk_ctx.ctx, hd->key, hd->keylen);
     return ret;
 }
 
@@ -147,7 +153,7 @@ gcry_error_t uadk_aes_setiv(gcry_uadk_aes_hd_t hd, const void *iv, size_t ivlen)
         return -1;
     }
     if (!hd->iv) {
-        hd->iv = malloc(sizeof(u_int8_t)*(CIPHER_IV_SIZE));
+        hd->iv = malloc(sizeof(u_int8_t) * (CIPHER_IV_SIZE));
         // 失败时释放资源
         if (hd->iv == NULL) {
             IFM_ERR("[%s] malloc iv failed\n", __func__);
@@ -262,18 +268,24 @@ gcry_error_t gcry_uadk_cipher_open(gcry_uadk_aes_hd_t *hd, int algo, int mode, u
     if (UadkEnabled() == false) {
         return gcry_cipher_open(&((*hd)->gcry_hd_t), algo, mode, flags);
     } else {
-        // 判断UADK支持的条件
-        if (algo != GCRY_CIPHER_AES && algo != GCRY_CIPHER_AES192 && algo != GCRY_CIPHER_AES256) {
+        // 判断UADK支持的条件，当前只支持4中算法
+        if (algo != GCRY_CIPHER_AES && algo != GCRY_CIPHER_AES192 && algo != GCRY_CIPHER_AES256 &&
+            algo != GCRY_CIPHER_SM4) {
             IFM_ERR("[%s] algo [%d] is invalid\n", __func__, algo);
             ret = 1;
         }
-        if (mode != GCRY_CIPHER_MODE_ECB && mode != GCRY_CIPHER_MODE_CBC &&
-            mode != GCRY_CIPHER_MODE_XTS && mode != GCRY_CIPHER_MODE_OFB) {
+        if (mode != GCRY_CIPHER_MODE_ECB && mode != GCRY_CIPHER_MODE_CBC && mode != GCRY_CIPHER_MODE_XTS &&
+            mode != GCRY_CIPHER_MODE_OFB) {
             IFM_ERR("[%s] mode [%d] is invalid\n", __func__, mode);
             ret = 1;
         }
         if (flags != 0) {
             IFM_ERR("[%s] flags [%d] is invalid\n", __func__, flags);
+            ret = 1;
+        }
+        // SM4只支持ECB和CBC
+        if (algo == GCRY_CIPHER_SM4 && (mode != GCRY_CIPHER_MODE_ECB && mode != GCRY_CIPHER_MODE_CBC)) {
+            IFM_ERR("[%s] algo [%d] and mode [%d] is unsupported\n", __func__, algo, mode);
             ret = 1;
         }
         if (algo == GCRY_CIPHER_AES192 && mode == GCRY_CIPHER_MODE_XTS) {
@@ -366,8 +378,16 @@ gcry_error_t gcry_uadk_cipher_encrypt(gcry_uadk_aes_hd_t hd, void *out, size_t o
 #ifdef __aarch64__
     if (UadkEnabled() == true && hd->use_uadk) {
         // length 应大于 0 且为 AES_BLOCK_SIZE 的整数倍，如 16, 32, 48, 64 等等
-        if (inlen > 0 && inlen < MAX_CIPHER_LENGTH && inlen % AES_BLOCK_SIZE == 0 && (hd -> iv)) {
-            return uadk_aes_encrypt(hd, out, outsize, in, inlen);
+        if (inlen > 0 && inlen < MAX_CIPHER_LENGTH && inlen % AES_BLOCK_SIZE == 0) {
+            if (hd->uadk_ctx.mode == WCRYPTO_CIPHER_ECB) {
+                return uadk_aes_encrypt(hd, out, outsize, in, inlen);
+            } else if (hd->iv) {
+                return uadk_aes_encrypt(hd, out, outsize, in, inlen);
+            } else {
+                IFM_ERR("hd->iv is invalid, can not use uadk\n");
+                hd->use_uadk = false;
+                return gcry_cipher_encrypt(hd->gcry_hd_t, out, outsize, in, inlen);
+            }
         } else {
             IFM_ERR("[%s] inlen [%ld] is invalid, can not use uadk\n", __func__, inlen);
             hd->use_uadk = false;
@@ -386,8 +406,16 @@ gcry_error_t gcry_uadk_cipher_decrypt(gcry_uadk_aes_hd_t hd, void *out, size_t o
 #ifdef __aarch64__
     if (UadkEnabled() == true && hd->use_uadk) {
         // length 应大于 0 且为 AES_BLOCK_SIZE 的整数倍，如 16, 32, 48, 64 等等
-        if (inlen > 0 && inlen < MAX_CIPHER_LENGTH && inlen % AES_BLOCK_SIZE == 0 && (hd -> iv)) {
-            return uadk_aes_decrypt(hd, out, outsize, in, inlen);
+        if (inlen > 0 && inlen < MAX_CIPHER_LENGTH && inlen % AES_BLOCK_SIZE == 0) {
+            if (hd->uadk_ctx.mode == WCRYPTO_CIPHER_ECB) {
+                return uadk_aes_decrypt(hd, out, outsize, in, inlen);
+            } else if (hd->iv) {
+                return uadk_aes_decrypt(hd, out, outsize, in, inlen);
+            } else {
+                IFM_ERR("hd->iv is invalid, can not use uadk\n");
+                hd->use_uadk = false;
+                return gcry_cipher_decrypt(hd->gcry_hd_t, out, outsize, in, inlen);
+            }
         } else {
             IFM_ERR("[%s] inlen [%ld] is invalid, can not use uadk\n", __func__, inlen);
             hd->use_uadk = false;
@@ -405,7 +433,7 @@ gcry_error_t gcry_uadk_cipher_ctl(gcry_uadk_aes_hd_t hd, int cmd, void *buffer, 
 {
 #ifdef __aarch64__
     // 不管是否能使用uadk都是调用此函数
-    return gcry_cipher_ctl (hd->gcry_hd_t, cmd, buffer, buflen);
+    return gcry_cipher_ctl(hd->gcry_hd_t, cmd, buffer, buflen);
 #else
     return gcry_cipher_ctl((gcry_cipher_hd_t)hd, cmd, buffer, buflen);
 #endif

@@ -21,6 +21,7 @@
  * [2]  https://www.akkadia.org/drepper/SHA-crypt.txt
  *
  ********************************************************************************/
+
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -29,8 +30,6 @@
 #include "crypt.h"
 #include "../ifm_utils.h"
 #include "xcrypt_uadk_sha2.h"
-
-
 /**
  *  本代码文件目前存在的问题
  *  1. crypt对于输入长度有限制，不能超过512字符，超过长度将返回一个固定值
@@ -48,22 +47,23 @@
 #include "uadk/v1/wd.h"
 #include "uadk/v1/wd_digest.h"
 
-#define b64t ((const char *) ascii64)
+#define b64t ((const char *)ascii64)
 
 #define LENGTH_OF_NUMBER(n) (sizeof #n - 1)
 
 #define XCRYPT_SHA256_HASH_LENGTH 43
 #define XCRYPT_SHA512_HASH_LENGTH 86
+#define XCRYPT_SM3_HASH_LENGTH 43
+#define XCRYPT_SM3_SET_SIZE 5
 
 int sha_hash_length = XCRYPT_SHA256_HASH_LENGTH;
 
-#define HASH_LENGTH \
-    (sizeof (salt_prefix) + sizeof (sha_rounds_prefix) + \
-    LENGTH_OF_NUMBER (ROUNDS_MAX) + SALT_LEN_MAX + 1 + sha_hash_length)
+#define HASH_LENGTH                                                                                                   \
+    (strlen(salt_prefix) + sizeof(sha_rounds_prefix) + LENGTH_OF_NUMBER(ROUNDS_MAX) + SALT_LEN_MAX + 1 +              \
+     sha_hash_length)
 
-const unsigned char ascii64[65] =
-        "./0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz"
-        "\x00";
+const unsigned char ascii64[65] = "./0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz"
+                                  "\x00";
 
 #define BASE 10
 #define ROUND_BASE 16
@@ -71,7 +71,7 @@ const unsigned char ascii64[65] =
 #define OUTPUT_SIZE3 3
 
 // COMMON DEFINTE
-static char salt_prefix[] = "$5$";
+static char salt_prefix[] = "$xxx$";
 static char sha_rounds_prefix[] = "rounds=";
 
 int SALT_LEN_MAX = 16;
@@ -81,9 +81,11 @@ int ROUNDS_MAX = 999999999;
 
 #define CRYPT_ALGO_SHA256 5
 #define CRYPT_ALGO_SHA512 6
+#define CRYPT_ALGO_SM3 7
 
 #define XCRYPT_SHA256_BLOCK_SIZE 32
 #define XCRYPT_SHA512_BLOCK_SIZE 64
+#define XCRYPT_SM3_BLOCK_SIZE 32
 
 int block_size = XCRYPT_SHA256_BLOCK_SIZE;
 uint8_t SHA2_DIGEST_SIZE = 32;
@@ -97,7 +99,7 @@ int XCRYPT_SHA2 = WCRYPTO_SHA256;
  * @param blocksize 步长
  * @return
  */
-int update_recycled (struct uadk_digest_st *uadk_ctx, size_t length, const uint8_t *data, int blocksize)
+int update_recycled(struct uadk_digest_st *uadk_ctx, size_t length, const uint8_t *data, int blocksize)
 {
     int ret = 0;
     size_t cnt;
@@ -107,13 +109,14 @@ int update_recycled (struct uadk_digest_st *uadk_ctx, size_t length, const uint8
             return ret;
         }
     }
-    ret = uadk_xcrypt_ctx_update(uadk_ctx, cnt, data, (uint8_t)blocksize);
-    if (ret) {
-        return ret;
+    if (cnt > 0) {
+        ret = uadk_xcrypt_ctx_update(uadk_ctx, cnt, data, (uint8_t)blocksize);
+        if (ret) {
+            return ret;
+        }
     }
     return ret;
 }
-
 
 /**
  * 适配libxcrypt中的crypt_shaXXXcrypt_rn函数
@@ -128,22 +131,31 @@ int update_recycled (struct uadk_digest_st *uadk_ctx, size_t length, const uint8
  * @param algo hash算法
  * @return
  */
-int sha2crypt(const char *phrase, size_t phr_size, const char *setting, size_t set_size,
-              uint8_t *output, size_t out_size, void *scratch, size_t scr_size, int algo)
+int sha2crypt(const char *phrase, size_t phr_size, const char *setting, size_t set_size, uint8_t *output,
+              size_t out_size, void *scratch, size_t scr_size, int algo)
 {
     struct ifm_sha512_buffer *buf = scratch;
     if (algo == CRYPT_ALGO_SHA256) { // SHA256算法参数设置
+        memset(salt_prefix, 0, sizeof(salt_prefix));
         strcpy(salt_prefix, "$5$");
         block_size = XCRYPT_SHA256_BLOCK_SIZE;
         SHA2_DIGEST_SIZE = XCRYPT_SHA256_BLOCK_SIZE;
         XCRYPT_SHA2 = WCRYPTO_SHA256;
         sha_hash_length = XCRYPT_SHA256_HASH_LENGTH;
-    } else {  // SHA512算法参数设置
+    } else if (algo == CRYPT_ALGO_SHA512) { // SHA512算法参数设置
+        memset(salt_prefix, 0, sizeof(salt_prefix));
         strcpy(salt_prefix, "$6$");
         block_size = XCRYPT_SHA512_BLOCK_SIZE;
         SHA2_DIGEST_SIZE = XCRYPT_SHA512_BLOCK_SIZE;
         XCRYPT_SHA2 = WCRYPTO_SHA512;
         sha_hash_length = XCRYPT_SHA512_HASH_LENGTH;
+    } else if (algo == CRYPT_ALGO_SM3) {
+        memset(salt_prefix, 0, sizeof(salt_prefix));
+        strcpy(salt_prefix, "$sm3$");
+        block_size = XCRYPT_SM3_BLOCK_SIZE;
+        SHA2_DIGEST_SIZE = XCRYPT_SM3_BLOCK_SIZE;
+        XCRYPT_SHA2 = WCRYPTO_SM3;
+        sha_hash_length = XCRYPT_SM3_HASH_LENGTH;
     }
 
     uint8_t *result = buf->result;
@@ -158,11 +170,12 @@ int sha2crypt(const char *phrase, size_t phr_size, const char *setting, size_t s
     size_t rounds = ROUNDS_DEFAULT; // Default number of rounds.
     int rounds_custom = 0;
 
-    if (strncmp (salt_prefix, salt, sizeof (salt_prefix) - 1) == 0) // Find beginning of salt string.
-        salt += sizeof (salt_prefix) - 1; // Skip salt prefix.
+    // 原有算法使用sizeof计算salt_prefix，由于在该方法，中，不同算法使用的salt_prefix长度不同，因此改为用strlen
+    if (strncmp(salt_prefix, salt, strlen(salt_prefix)) == 0) // Find beginning of salt string.
+        salt += strlen(salt_prefix);                          // Skip salt prefix.
 
-    if (strncmp (salt, sha_rounds_prefix, sizeof (sha_rounds_prefix) - 1) == 0) {
-        const char *num = salt + sizeof (sha_rounds_prefix) - 1;
+    if (strncmp(salt, sha_rounds_prefix, sizeof(sha_rounds_prefix) - 1) == 0) {
+        const char *num = salt + sizeof(sha_rounds_prefix) - 1;
         /* Do not allow an explicit setting of zero rounds, nor of the
            default number of rounds, nor leading zeroes on the rounds.  */
         if (!(*num >= '1' && *num <= '9')) {
@@ -172,11 +185,8 @@ int sha2crypt(const char *phrase, size_t phr_size, const char *setting, size_t s
 
         errno = 0;
         char *endp;
-        rounds = strtoul (num, &endp, BASE);
-        if (endp == num || *endp != '$'
-            || rounds < ROUNDS_MIN
-            || rounds > ROUNDS_MAX
-            || errno) {
+        rounds = strtoul(num, &endp, BASE);
+        if (endp == num || *endp != '$' || rounds < ROUNDS_MIN || rounds > ROUNDS_MAX || errno) {
             errno = EINVAL;
             return errno;
         }
@@ -184,7 +194,7 @@ int sha2crypt(const char *phrase, size_t phr_size, const char *setting, size_t s
         rounds_custom = 1;
     }
 
-    salt_size = strcspn (salt, "$:\n"); // The salt ends at the next '$' or the end of the string.
+    salt_size = strcspn(salt, "$:\n"); // The salt ends at the next '$' or the end of the string.
     if (!(salt[salt_size] == '$' || !salt[salt_size])) {
         errno = EINVAL;
         return errno;
@@ -251,7 +261,7 @@ int sha2crypt(const char *phrase, size_t phr_size, const char *setting, size_t s
     }
     /* Add for any character in the phrase one byte of the alternate sum.  */
     for (cnt = phr_size; cnt > block_size; cnt -= block_size) {
-        ret = uadk_xcrypt_ctx_update(&(buf->uadk_ctx), block_size, (uint8_t *) result, SHA2_DIGEST_SIZE);
+        ret = uadk_xcrypt_ctx_update(&(buf->uadk_ctx), block_size, (uint8_t *)result, SHA2_DIGEST_SIZE);
         if (ret) {
             uadk_xcrypt_ctx_free(&(buf->uadk_ctx));
             return ret;
@@ -266,9 +276,9 @@ int sha2crypt(const char *phrase, size_t phr_size, const char *setting, size_t s
        1 add the alternate sum, for every 0 the phrase.  */
     for (cnt = phr_size; cnt > 0; cnt >>= 1) {
         if ((cnt & 1) != 0) {
-            ret = uadk_xcrypt_ctx_update(&(buf->uadk_ctx), block_size, (uint8_t *) result, SHA2_DIGEST_SIZE);
+            ret = uadk_xcrypt_ctx_update(&(buf->uadk_ctx), block_size, (uint8_t *)result, SHA2_DIGEST_SIZE);
         } else {
-            ret = uadk_xcrypt_ctx_update(&(buf->uadk_ctx), phr_size, (uint8_t *) phrase, SHA2_DIGEST_SIZE);
+            ret = uadk_xcrypt_ctx_update(&(buf->uadk_ctx), phr_size, (uint8_t *)phrase, SHA2_DIGEST_SIZE);
         }
         if (ret) {
             uadk_xcrypt_ctx_free(&(buf->uadk_ctx));
@@ -292,7 +302,7 @@ int sha2crypt(const char *phrase, size_t phr_size, const char *setting, size_t s
     }
     /* For every character in the password add the entire password.  */
     for (cnt = 0; cnt < phr_size; ++cnt) {
-        ret = uadk_xcrypt_ctx_update(&(buf->uadk_ctx), phr_size, (uint8_t *) phrase, SHA2_DIGEST_SIZE);
+        ret = uadk_xcrypt_ctx_update(&(buf->uadk_ctx), phr_size, (uint8_t *)phrase, SHA2_DIGEST_SIZE);
         if (ret) {
             uadk_xcrypt_ctx_free(&(buf->uadk_ctx));
             return ret;
@@ -314,8 +324,8 @@ int sha2crypt(const char *phrase, size_t phr_size, const char *setting, size_t s
         return ret;
     }
     /* For every character in the password add the entire password.  */
-    for (cnt = 0; cnt < (size_t) ROUND_BASE + (size_t) result[0]; ++cnt) {
-        ret = uadk_xcrypt_ctx_update(&(buf->uadk_ctx), salt_size, (uint8_t *) salt, SHA2_DIGEST_SIZE);
+    for (cnt = 0; cnt < (size_t)ROUND_BASE + (size_t)result[0]; ++cnt) {
+        ret = uadk_xcrypt_ctx_update(&(buf->uadk_ctx), salt_size, (uint8_t *)salt, SHA2_DIGEST_SIZE);
         if (ret) {
             uadk_xcrypt_ctx_free(&(buf->uadk_ctx));
             return ret;
@@ -341,13 +351,13 @@ int sha2crypt(const char *phrase, size_t phr_size, const char *setting, size_t s
         }
         /* Add phrase or last result.  */
         if ((cnt & 1) != 0) {
-            ret = update_recycled(&(buf->uadk_ctx), phr_size, (uint8_t *) p_bytes, block_size);
+            ret = update_recycled(&(buf->uadk_ctx), phr_size, (uint8_t *)p_bytes, block_size);
             if (ret) {
                 uadk_xcrypt_ctx_free(&(buf->uadk_ctx));
                 return ret;
             }
         } else {
-            ret = uadk_xcrypt_ctx_update(&(buf->uadk_ctx), block_size, (uint8_t *) result, SHA2_DIGEST_SIZE);
+            ret = uadk_xcrypt_ctx_update(&(buf->uadk_ctx), block_size, (uint8_t *)result, SHA2_DIGEST_SIZE);
             if (ret) {
                 uadk_xcrypt_ctx_free(&(buf->uadk_ctx));
                 return ret;
@@ -355,7 +365,7 @@ int sha2crypt(const char *phrase, size_t phr_size, const char *setting, size_t s
         }
         /* Add salt for numbers not divisible by 3.  */
         if (cnt % 3 != 0) {
-            ret = update_recycled(&(buf->uadk_ctx), salt_size, (uint8_t *) s_bytes, block_size);
+            ret = update_recycled(&(buf->uadk_ctx), salt_size, (uint8_t *)s_bytes, block_size);
             if (ret) {
                 uadk_xcrypt_ctx_free(&(buf->uadk_ctx));
                 return ret;
@@ -363,7 +373,7 @@ int sha2crypt(const char *phrase, size_t phr_size, const char *setting, size_t s
         }
         /* Add phrase for numbers not divisible by 7.  */
         if (cnt % 7 != 0) {
-            ret = update_recycled(&(buf->uadk_ctx), phr_size, (uint8_t *) p_bytes, block_size);
+            ret = update_recycled(&(buf->uadk_ctx), phr_size, (uint8_t *)p_bytes, block_size);
             if (ret) {
                 uadk_xcrypt_ctx_free(&(buf->uadk_ctx));
                 return ret;
@@ -371,13 +381,13 @@ int sha2crypt(const char *phrase, size_t phr_size, const char *setting, size_t s
         }
         /* Add phrase or last result.  */
         if ((cnt & 1) != 0) {
-            ret = uadk_xcrypt_ctx_update(&(buf->uadk_ctx), block_size, (uint8_t *) result, SHA2_DIGEST_SIZE);
+            ret = uadk_xcrypt_ctx_update(&(buf->uadk_ctx), block_size, (uint8_t *)result, SHA2_DIGEST_SIZE);
             if (ret) {
                 uadk_xcrypt_ctx_free(&(buf->uadk_ctx));
                 return ret;
             }
         } else {
-            ret = update_recycled(&(buf->uadk_ctx), phr_size, (uint8_t *) p_bytes, block_size);
+            ret = update_recycled(&(buf->uadk_ctx), phr_size, (uint8_t *)p_bytes, block_size);
             if (ret) {
                 uadk_xcrypt_ctx_free(&(buf->uadk_ctx));
                 return ret;
@@ -391,71 +401,80 @@ int sha2crypt(const char *phrase, size_t phr_size, const char *setting, size_t s
                 return ret;
             }
         }
-        uadk_xcrypt_ctx_digest(&(buf->uadk_ctx), SHA2_DIGEST_SIZE, (uint8_t *) result);
+        uadk_xcrypt_ctx_digest(&(buf->uadk_ctx), SHA2_DIGEST_SIZE, (uint8_t *)result);
     }
 
     uadk_xcrypt_ctx_free(&(buf->uadk_ctx));
 
     /* Now we can construct the result string. */
-    memcpy (cp, salt_prefix, sizeof (salt_prefix) - 1);
-    cp += sizeof (salt_prefix) - 1;
+    memcpy(cp, salt_prefix, strlen(salt_prefix));
+    cp += strlen(salt_prefix);
 
-    if (rounds_custom==1) {
-        int n = snprintf (cp, HASH_LENGTH - (sizeof (salt_prefix) - 1),
-                          "%s%zu$", sha_rounds_prefix, rounds);
+    if (rounds_custom == 1) {
+        int n = snprintf(cp, HASH_LENGTH - (strlen(salt_prefix)), "%s%zu$", sha_rounds_prefix, rounds);
         cp += n;
     }
 
-    memcpy (cp, salt, salt_size);
+    memcpy(cp, salt, salt_size);
     cp += salt_size;
     *cp++ = '$';
 
-#define b64_from_24bit(B2, B1, B0, N)                   \
-    do {                                                \
-    unsigned int w = ((((unsigned int)(B2)) << 16) |    \
-                      (((unsigned int)(B1)) << 8) |     \
-                      ((unsigned int)(B0)));            \
-    int n = (N);                                        \
-    while (n-- > 0) {                                   \
-        *cp++ = b64t[w & 0x3f];                         \
-        w >>= 6;                                        \
-    }                                                 \
+#define b64_from_24bit(B2, B1, B0, N)                                                                                 \
+    do {                                                                                                              \
+        unsigned int w = ((((unsigned int)(B2)) << 16) | (((unsigned int)(B1)) << 8) | ((unsigned int)(B0)));         \
+        int n = (N);                                                                                                  \
+        while (n-- > 0) {                                                                                             \
+            *cp++ = b64t[w & 0x3f];                                                                                   \
+            w >>= 6;                                                                                                  \
+        }                                                                                                             \
     } while (0)
     if (algo == CRYPT_ALGO_SHA256) {
-        b64_from_24bit (result[0], result[10], result[20], 4);
-        b64_from_24bit (result[21], result[1], result[11], 4);
-        b64_from_24bit (result[12], result[22], result[2], 4);
-        b64_from_24bit (result[3], result[13], result[23], 4);
-        b64_from_24bit (result[24], result[4], result[14], 4);
-        b64_from_24bit (result[15], result[25], result[5], 4);
-        b64_from_24bit (result[6], result[16], result[26], 4);
-        b64_from_24bit (result[27], result[7], result[17], 4);
-        b64_from_24bit (result[18], result[28], result[8], 4);
-        b64_from_24bit (result[9], result[19], result[29], 4);
-        b64_from_24bit (0, result[31], result[30], 3);
-    } else {
-        b64_from_24bit (result[0], result[21], result[42], 4);
-        b64_from_24bit (result[22], result[43], result[1], 4);
-        b64_from_24bit (result[44], result[2], result[23], 4);
-        b64_from_24bit (result[3], result[24], result[45], 4);
-        b64_from_24bit (result[25], result[46], result[4], 4);
-        b64_from_24bit (result[47], result[5], result[26], 4);
-        b64_from_24bit (result[6], result[27], result[48], 4);
-        b64_from_24bit (result[28], result[49], result[7], 4);
-        b64_from_24bit (result[50], result[8], result[29], 4);
-        b64_from_24bit (result[9], result[30], result[51], 4);
-        b64_from_24bit (result[31], result[52], result[10], 4);
-        b64_from_24bit (result[53], result[11], result[32], 4);
-        b64_from_24bit (result[12], result[33], result[54], 4);
-        b64_from_24bit (result[34], result[55], result[13], 4);
-        b64_from_24bit (result[56], result[14], result[35], 4);
-        b64_from_24bit (result[15], result[36], result[57], 4);
-        b64_from_24bit (result[37], result[58], result[16], 4);
-        b64_from_24bit (result[59], result[17], result[38], 4);
-        b64_from_24bit (result[18], result[39], result[60], 4);
-        b64_from_24bit (result[40], result[61], result[19], 4);
-        b64_from_24bit (result[62], result[20], result[41], 4);
-        b64_from_24bit (0, 0, result[63], 2);
+        b64_from_24bit(result[0], result[10], result[20], 4);
+        b64_from_24bit(result[21], result[1], result[11], 4);
+        b64_from_24bit(result[12], result[22], result[2], 4);
+        b64_from_24bit(result[3], result[13], result[23], 4);
+        b64_from_24bit(result[24], result[4], result[14], 4);
+        b64_from_24bit(result[15], result[25], result[5], 4);
+        b64_from_24bit(result[6], result[16], result[26], 4);
+        b64_from_24bit(result[27], result[7], result[17], 4);
+        b64_from_24bit(result[18], result[28], result[8], 4);
+        b64_from_24bit(result[9], result[19], result[29], 4);
+        b64_from_24bit(0, result[31], result[30], 3);
+    } else if (algo == CRYPT_ALGO_SHA512) {
+        b64_from_24bit(result[0], result[21], result[42], 4);
+        b64_from_24bit(result[22], result[43], result[1], 4);
+        b64_from_24bit(result[44], result[2], result[23], 4);
+        b64_from_24bit(result[3], result[24], result[45], 4);
+        b64_from_24bit(result[25], result[46], result[4], 4);
+        b64_from_24bit(result[47], result[5], result[26], 4);
+        b64_from_24bit(result[6], result[27], result[48], 4);
+        b64_from_24bit(result[28], result[49], result[7], 4);
+        b64_from_24bit(result[50], result[8], result[29], 4);
+        b64_from_24bit(result[9], result[30], result[51], 4);
+        b64_from_24bit(result[31], result[52], result[10], 4);
+        b64_from_24bit(result[53], result[11], result[32], 4);
+        b64_from_24bit(result[12], result[33], result[54], 4);
+        b64_from_24bit(result[34], result[55], result[13], 4);
+        b64_from_24bit(result[56], result[14], result[35], 4);
+        b64_from_24bit(result[15], result[36], result[57], 4);
+        b64_from_24bit(result[37], result[58], result[16], 4);
+        b64_from_24bit(result[59], result[17], result[38], 4);
+        b64_from_24bit(result[18], result[39], result[60], 4);
+        b64_from_24bit(result[40], result[61], result[19], 4);
+        b64_from_24bit(result[62], result[20], result[41], 4);
+        b64_from_24bit(0, 0, result[63], 2);
+    } else if (algo == CRYPT_ALGO_SM3) {
+        b64_from_24bit(result[0], result[10], result[20], 4);
+        b64_from_24bit(result[21], result[1], result[11], 4);
+        b64_from_24bit(result[12], result[22], result[2], 4);
+        b64_from_24bit(result[3], result[13], result[23], 4);
+        b64_from_24bit(result[24], result[4], result[14], 4);
+        b64_from_24bit(result[15], result[25], result[5], 4);
+        b64_from_24bit(result[6], result[16], result[26], 4);
+        b64_from_24bit(result[27], result[7], result[17], 4);
+        b64_from_24bit(result[18], result[28], result[8], 4);
+        b64_from_24bit(result[9], result[19], result[29], 4);
+        b64_from_24bit(0, result[31], result[30], 3);
     }
     *cp = '\0';
 
@@ -469,7 +488,7 @@ int sha2crypt(const char *phrase, size_t phr_size, const char *setting, size_t s
  * @param *size 输出大小
  * @return
  */
-void make_failure_token (const char *setting, char *output, int size)
+void make_failure_token(const char *setting, char *output, int size)
 {
     if (size >= OUTPUT_SIZE3) {
         output[0] = '*';
@@ -493,16 +512,15 @@ void make_failure_token (const char *setting, char *output, int size)
  * @param *setting 加密setting
  * @return
  */
-int check_badsalt_chars (const char *setting)
+int check_badsalt_chars(const char *setting)
 {
     size_t i;
 
     for (i = 0; setting[i] != '\0'; i++)
-        if ((unsigned char) setting[i] <= 0x20 ||
-            (unsigned char) setting[i] >= 0x7f)
+        if ((unsigned char)setting[i] <= 0x20 || (unsigned char)setting[i] >= 0x7f)
             return 1;
 
-    return strcspn (setting, "!*:;\\") != i;
+    return strcspn(setting, "!*:;\\") != i;
 }
 
 /**
@@ -513,8 +531,8 @@ int check_badsalt_chars (const char *setting)
  * @param out_bytes_size opdata.out_bytes大小
  * @return
  */
-int uadk_xcrypt_ctx_init(struct uadk_digest_st *uadk_ctx, enum wcrypto_digest_alg algs,
-                         int init, uint8_t out_bytes_size)
+int uadk_xcrypt_ctx_init(struct uadk_digest_st *uadk_ctx, enum wcrypto_digest_alg algs, int init,
+                         uint8_t out_bytes_size)
 {
     static struct wd_queue q;
     static struct wd_blkpool_setup pool_setup;
@@ -658,44 +676,53 @@ char *uadk_crypt_r(const char *__phrase, const char *__setting, struct crypt_dat
 {
 #ifdef __aarch64__
     if (UadkEnabled() == true) {
-        make_failure_token (__setting, __data->output, sizeof __data->output);
+        make_failure_token(__setting, __data->output, sizeof __data->output);
         if (!__phrase || !__setting) {
             errno = EINVAL;
             return "*0";
         }
         /* Do these strlen() calls before reading prefixes of either
            'phrase' or 'setting', so we get a predictable crash if they are not valid strings. */
-        size_t phr_size = strlen (__phrase);
-        size_t set_size = strlen (__setting);
+        size_t phr_size = strlen(__phrase);
+        size_t set_size = strlen(__setting);
         if (phr_size >= CRYPT_MAX_PASSPHRASE_SIZE) {
             errno = ERANGE;
             return "*0";
         }
-        if (check_badsalt_chars (__setting)) {
+        if (check_badsalt_chars(__setting)) {
             errno = EINVAL;
             return "*0";
         }
         int ret = 0;
-        if (__setting[1] == '5' && phr_size>0) {
+        if (__setting[1] == '5' && phr_size > 0) {
             struct ifm_sha256_buffer scratch;
             scratch.use_uadk = true;
             ret = sha2crypt(__phrase, phr_size, __setting, set_size, (unsigned char *)__data->output,
-                            sizeof (__data->output), &scratch, sizeof (&scratch), CRYPT_ALGO_SHA256);
+                            sizeof(__data->output), &scratch, sizeof(&scratch), CRYPT_ALGO_SHA256);
             if (ret) {
+                IFM_ERR("run sha2crypt failed, use default crypt_r!\n");
                 return crypt_r(__phrase, __setting, __data);
             }
-        } else if (__setting[1] == '6' && phr_size>0) {
+        } else if (__setting[1] == '6' && phr_size > 0) {
             struct ifm_sha512_buffer scratch;
             scratch.use_uadk = true;
             ret = sha2crypt(__phrase, phr_size, __setting, set_size, (unsigned char *)__data->output,
-                            sizeof (__data->output), &scratch, sizeof (&scratch), CRYPT_ALGO_SHA512);
+                            sizeof(__data->output), &scratch, sizeof(&scratch), CRYPT_ALGO_SHA512);
             if (ret) {
+                IFM_ERR("run sha2crypt failed, use default crypt_r!\n");
                 return crypt_r(__phrase, __setting, __data);
             }
+        } else if (set_size >= XCRYPT_SM3_SET_SIZE && strncmp(__setting, "$sm3$", XCRYPT_SM3_SET_SIZE) == 0 &&
+                   phr_size > 0) {
+            struct ifm_sm3_buffer scratch;
+            scratch.use_uadk = true;
+            ret = sha2crypt(__phrase, phr_size, __setting, set_size, (unsigned char *)__data->output,
+                            sizeof(__data->output), &scratch, sizeof(&scratch), CRYPT_ALGO_SM3);
         } else {
+            IFM_ERR("type is invalid, use default crypt_r! phr_size: %ld\n", phr_size);
             return crypt_r(__phrase, __setting, __data);
         }
-        explicit_bzero (__data->internal, sizeof __data->internal);
+        explicit_bzero(__data->internal, sizeof __data->internal);
 #if ENABLE_FAILURE_TOKENS
         return __data->output;
 #else
@@ -719,7 +746,7 @@ char *uadk_crypt_r(const char *__phrase, const char *__setting, struct crypt_dat
  */
 char *uadk_crypt_rn(const char *__phrase, const char *__setting, void *__data, int __size)
 {
-    if (__size < 0 || (size_t)__size < sizeof (struct crypt_data)) {
+    if (__size < 0 || (size_t)__size < sizeof(struct crypt_data)) {
         errno = ERANGE;
         return 0;
     }
@@ -740,19 +767,19 @@ char *uadk_crypt_rn(const char *__phrase, const char *__setting, void *__data, i
 char *uadk_crypt_ra(const char *__phrase, const char *__setting, void **__data, int *__size)
 {
     if (!*__data) {
-        *__data = malloc (sizeof (struct crypt_data));
+        *__data = malloc(sizeof(struct crypt_data));
         if (!*__data) {
             return 0;
         }
-        *__size = sizeof (struct crypt_data);
+        *__size = sizeof(struct crypt_data);
     }
-    if (*__size < 0 || (size_t)*__size < sizeof (struct crypt_data)) {
-        void *rdata = malloc (sizeof (struct crypt_data));
+    if (*__size < 0 || (size_t)*__size < sizeof(struct crypt_data)) {
+        void *rdata = malloc(sizeof(struct crypt_data));
         if (!rdata) {
             return 0;
         }
         *__data = rdata;
-        *__size = sizeof (struct crypt_data);
+        *__size = sizeof(struct crypt_data);
     }
 
     struct crypt_data *nr_crypt_ctx = *__data;

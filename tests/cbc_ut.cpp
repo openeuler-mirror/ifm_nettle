@@ -33,6 +33,7 @@
 /* This file tests deprecated functions */
 #include "testutils.h"
 #include "aes.h"
+#include "sm4.h"
 #include "cbc.h"
 #include "nettle/knuth-lfib.h"
 //#include "nettle/nettle-internal.h"
@@ -40,6 +41,7 @@
 #define aes128_ctx ifm_aes128_ctx
 #define aes192_ctx ifm_aes192_ctx
 #define aes256_ctx ifm_aes256_ctx
+#define sm4_ctx ifm_sm4_ctx
 #define aes_ctx ifm_aes_ctx
 
 /* Test with more data and inplace decryption, to check that the
@@ -52,6 +54,38 @@ memcpy((ctx)->iv, (data), sizeof((ctx)->iv))
 int verbose = 1;    // Enable verbose output
 
 // this code from nettle-internal.c
+struct cbc_sm4_ctx CBC_CTX(struct sm4_ctx, SM4_BLOCK_SIZE);
+static void
+cbc_sm4_set_encrypt_key(struct cbc_sm4_ctx *ctx, const uint8_t *key)
+{
+  sm4_set_encrypt_key(&ctx->ctx, key);
+}
+static void
+cbc_sm4_set_iv(struct cbc_sm4_ctx *ctx, const uint8_t *iv)
+{
+  CBC_SET_IV(ctx, iv);
+}
+static void
+cbc_sm4_encrypt_wrapper(struct cbc_sm4_ctx *ctx,
+			   size_t length, uint8_t *dst,
+			   const uint8_t *src)
+{
+  cbc_sm4_encrypt(&ctx->ctx, ctx->iv, length, dst, src);
+}
+const struct nettle_aead
+nettle_cbc_sm4 = {
+  "cbc_sm4", sizeof(struct cbc_sm4_ctx),
+  SM4_BLOCK_SIZE, SM4_KEY_SIZE,
+  SM4_BLOCK_SIZE, 0,
+  (nettle_set_key_func*) cbc_sm4_set_encrypt_key,
+  NULL,
+  (nettle_set_key_func*) cbc_sm4_set_iv,
+  NULL,
+  (nettle_crypt_func *) cbc_sm4_encrypt_wrapper,
+  NULL,
+  NULL,
+};
+
 struct cbc_aes128_ctx CBC_CTX(struct aes128_ctx, AES_BLOCK_SIZE);
 static void
 cbc_aes128_set_encrypt_key(struct cbc_aes128_ctx *ctx, const uint8_t *key)
@@ -363,7 +397,13 @@ TEST(cbc_testcases, test_cbc_4)
 
     test_cbc_bulk();
 }
-
+TEST(cbc_testcases, test_cbc_sm4_1)
+{
+  test_cipher_cbc(&nettle_sm4, SHEX("b00b1e51ba8b9bfcd584ab5b73ab7660"),
+                SHEX("61626364616263646162636461626364"),
+                SHEX("70b6ffc1be317df5be70e6e0f564bb6a"),
+                SHEX("e5709dcac5e3016de93aaf7b364693c3"));
+}
 /*
 IV 
   000102030405060708090a0b0c0d0e0f 
