@@ -1,0 +1,50 @@
+From e1d75cf4cbc84acc7bd64634cd49ad560a64558b Mon Sep 17 00:00:00 2001
+From: tannnxin <njutanx@163.com>
+Date: Fri, 8 Dec 2023 21:10:43 +0800
+Subject: [PATCH] support ifm_libgcrypt instead of libgcrypt
+
+---
+ libxslt.spec | 8 ++++++--
+ 1 file changed, 6 insertions(+), 2 deletions(-)
+
+diff --git a/libxslt.spec b/libxslt.spec
+index 7c0f21a..d462f43 100644
+--- a/libxslt.spec
++++ b/libxslt.spec
+@@ -1,12 +1,13 @@
+ Name:     libxslt
+ Version:  1.1.37
+-Release:  1
++Release:  2
+ Summary:  XSLT Transformation Library
+ License:  MIT
+ URL:      http://xmlsoft.org/libxslt/
+ Source0:  https://github.com/GNOME/%{name}/archive/v%{version}.tar.gz#/%{name}-%{version}.tar.gz
+ # PATCH-FIX-UPSTREAM bug-fix https://github.com/GNOME/libxslt/
+ Patch0: CVE-2015-9019.patch
++Patch1: support-ifm_libgcrypt-instead-of-gcrypt.patch
+ 
+ BuildRequires: gcc make libtool autoconf automake libgcrypt-devel pkgconfig(libxml-2.0) >= 2.6.27
+ 
+@@ -49,7 +50,7 @@ with XPath functions written in Python.
+ %build
+ chmod 644 python/tests/*
+ autoreconf -vfi
+-%configure --disable-static --disable-silent-rules --with-python 
++%configure --disable-static --disable-silent-rules --with-python --with-ifm_libgcrypt
+ %make_build
+ 
+ %install
+@@ -100,6 +101,9 @@ pushd $RPM_BUILD_ROOT/%{_includedir}/%{name}; touch -m --reference=xslt.h ../../
+ %exclude %{_docdir}/../licenses/libxslt/Copyright
+ 
+ %changelog
++* Wed Dec 06 2023 tanxin <njutanx@163.com> - 1.1.37-2
++- DESC:support-ifm_gcrypt-instead-of-gcrypt
++
+ * Sat Nov 05 2022 shixuantong <shixuantong1@huawei.com> - 1.1.37-1
+ - Type:bugfix
+ - ID:NA
+-- 
+2.33.0
+
