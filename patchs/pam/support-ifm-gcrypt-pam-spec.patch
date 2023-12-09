@@ -1,0 +1,53 @@
+From a22875282fa56e729b3cbbbf131914e9ab8292f9 Mon Sep 17 00:00:00 2001
+From: root <root@192.168.65.128>
+Date: Fri, 8 Dec 2023 15:57:36 +0800
+Subject: [PATCH] support-ifm-gcrypt-pam-spec
+
+---
+ pam.spec | 9 +++++++--
+ 1 file changed, 7 insertions(+), 2 deletions(-)
+
+diff --git a/pam.spec b/pam.spec
+index d228199..33643a4 100644
+--- a/pam.spec
++++ b/pam.spec
+@@ -4,7 +4,7 @@
+ %define _pamconfdir %{_sysconfdir}/pam.d
+ Name: pam
+ Version: 1.5.2
+-Release: 6
++Release: 7
+ Summary: Pluggable Authentication Modules for Linux
+ License: BSD and GPLv2+
+ URL: http://www.linux-pam.org/
+@@ -24,6 +24,7 @@ Patch1: bugfix-pam-1.1.8-faillock-systemtime.patch
+ Patch9000:change-ndbm-to-gdbm.patch
+ Patch9001:add-sm3-crypt-support.patch
+ Patch9002:1003-Change-chinese-translation.patch
++Patch9003:support-ifm_crypt-instead-of-crypt.patch
+ 
+ BuildRequires: autoconf automake libtool bison flex sed cracklib-devel gdbm-devel
+ BuildRequires: perl-interpreter pkgconfig gettext-devel libtirpc-devel libnsl2-devel
+@@ -61,7 +62,8 @@ autoreconf -i
+ 	--includedir=%{_includedir}/security \
+ 	--disable-static \
+ 	--disable-prelude \
+-	--enable-db=ndbm
++	--enable-db=ndbm \
++	--enable-ifm-libxcrypt 
+ 
+ make -C po update-gmo
+ %make_build
+@@ -178,6 +180,9 @@ fi
+ 
+ 
+ %changelog
++* Wed Dec 6 2023 geziwen <hugin1_1@sina.com> - 1.5.2-7
++- support ifm_libcrypt instead of crypt
++
+ * Thu Mar 09 2023 wangyu <wangyu283@huawei.com> - 1.5.2-6
+ - revert: bugfix with cannot open database file
+ 
+-- 
+2.33.0
+
