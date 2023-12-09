@@ -1,0 +1,71 @@
+From ba8a1e79433a0b372ae1248d76a0758a6736c6f4 Mon Sep 17 00:00:00 2001
+From: tannnxin <njutanx@163.com>
+Date: Sun, 10 Dec 2023 01:15:25 +0800
+Subject: [PATCH] support ifm_libgcrypt instead of libgcrypt
+
+---
+ configure.ac | 15 +++++++++++++++
+ lib/login.c  | 18 ++++++++++++++++++
+ 2 files changed, 33 insertions(+)
+
+diff --git a/configure.ac b/configure.ac
+index 5fe1deb..9f2f53c 100644
+--- a/configure.ac
++++ b/configure.ac
+@@ -24,6 +24,21 @@ case $host in
+     ;;
+ esac
+ 
++AC_ARG_WITH([ifm_libgcrypt],
++    [AS_HELP_STRING([--with-ifm_libgcrypt], [Enable IFM support with libgcrypt (default is no)])],
++    [use_ifm_libgcrypt="$withval"],
++    [use_ifm_libgcrypt="no"])
++
++if test "x$use_ifm_libgcrypt" = "xyes"; then
++    AC_MSG_WARN([IFM support with libgcrypt is enabled.])
++    PKG_CHECK_MODULES([IFM_LIBGCRYPT], [ifm_libgcrypt],
++        [LIBS="-lifm_libgcrypt $LIBS"
++        AC_DEFINE([USE_IFM_LIBGCRYPT], [1], [Define if IFM support with libgcrypt is enabled])],
++        [
++        AC_MSG_ERROR([Could not find IFM with libgcrypt library])
++        ])
++fi
++
+ AC_ARG_ENABLE([werror], [AS_HELP_STRING([--disable-werror],
+               [Disables building with -Werror by default])])
+ 
+diff --git a/lib/login.c b/lib/login.c
+index 062f6b3..f8ff4d3 100644
+--- a/lib/login.c
++++ b/lib/login.c
+@@ -44,9 +44,27 @@
+ #include "iscsi-private.h"
+ #include "scsi-lowlevel.h"
+ #include "md5.h"
++#ifndef USE_IFM_LIBGCRYPT
+ #ifdef HAVE_LIBGCRYPT
+ #include <gcrypt.h>
+ #endif
++#else
++#include "ifm/ifm_gcrypt.h"
++
++#undef gcry_md_putc
++#define gcry_md_putc(h,c)  \
++            do {                                          \
++                gcry_uadk_md_hd_t h__ = (h);                   \
++                if( (h__)->gcry_hd_t->bufpos == (h__)->gcry_hd_t->bufsize )     \
++                    gcry_md_write( (h__), NULL, 0 );      \
++                (h__)->gcry_hd_t->buf[(h__)->gcry_hd_t->bufpos++] = (c) & 0xff; \
++            } while(0)
++
++#define gcry_md_handle gcry_uadk_md_hd
++#define gcry_md_hd_t gcry_uadk_md_hd_t
++#define gcry_cipher_handle gcry_uadk_aes_hd
++#define gcry_cipher_hd_t gcry_uadk_aes_hd_t
++#endif
+ 
+ static int
+ iscsi_login_add_initiatorname(struct iscsi_context *iscsi, struct iscsi_pdu *pdu)
+-- 
+2.33.0
+

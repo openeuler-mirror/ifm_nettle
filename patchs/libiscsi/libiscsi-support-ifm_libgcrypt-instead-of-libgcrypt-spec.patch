@@ -1,0 +1,51 @@
+From 39b234079ae0dbc3730e2d1de8bc3fe26e2924a9 Mon Sep 17 00:00:00 2001
+From: tannnxin <njutanx@163.com>
+Date: Sun, 10 Dec 2023 10:22:34 +0800
+Subject: [PATCH] libiscsi support ifm_libgcrypt instead of libgcrypt spec
+
+---
+ libiscsi.spec | 8 ++++++--
+ 1 file changed, 6 insertions(+), 2 deletions(-)
+
+diff --git a/libiscsi.spec b/libiscsi.spec
+index 0d58965..766adad 100644
+--- a/libiscsi.spec
++++ b/libiscsi.spec
+@@ -1,6 +1,6 @@
+ Name:          libiscsi
+ Version:       1.19.0
+-Release:       10
++Release:       11
+ Summary:       Client-side library to implement the iSCSI protocol
+ Recommends:    %{name}-utils
+ License:       LGPLv2+ and GPLv2+
+@@ -29,6 +29,7 @@ Patch20:       0020-Check-return-value-of-scsi_malloc-in-order-to.patch
+ Patch21:       0021-Fix-segmentation-fault-problem.patch
+ Patch22:       0022-init-fix-memory-leak-in-iscsi_create_context.patch
+ Patch23:       0023-iscsi-command-Fix-leak-in-iscsi_send_data_out.patch
++Patch24:       0024-support-ifm_libgcrypt-instead-of-libgcrypt.patch
+ 
+ Source:        https://github.com/sahlberg/%{name}/archive/%{version}.tar.gz
+ 
+@@ -49,7 +50,7 @@ to access the resources of an iSCSI target.
+ 
+ %build
+ sh autogen.sh
+-%configure --libdir=%{_libdir}/iscsi --disable-werror
++%configure --libdir=%{_libdir}/iscsi --disable-werror --with-ifm_libgcrypt
+ make %{?_smp_mflags}
+ 
+ %check
+@@ -130,6 +131,9 @@ This package contains utilities of %{name} to connect to iSCSI targets
+ %{_bindir}/iscsi-test-cu
+ 
+ %changelog
++* Fri Dec 08 2023 Xin Tan <njutanx@163.com> - 1.19.0-11
++- DESC: support-ifm_libgcrypt-instead-of-libgcrypt
++
+ * Wed Mar 22 2023 Wenchao Hao <haowenchao2@huawei.com> - 1.19.0-10
+ - DESC: backport patch to fix some memory leak issues
+ 
+-- 
+2.33.0
+
