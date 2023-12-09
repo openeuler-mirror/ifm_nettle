@@ -1,0 +1,62 @@
+From e4e42ae9dc5eee57f4ab6a33b97395b1b54f1747 Mon Sep 17 00:00:00 2001
+From: tannnxin <njutanx@163.com>
+Date: Fri, 8 Dec 2023 17:18:39 +0800
+Subject: [PATCH] support ifm_libgcrypt instead of gcrypt
+
+---
+ configure.ac      | 18 ++++++++++++++++++
+ libexslt/crypto.c |  8 ++++++++
+ 2 files changed, 26 insertions(+)
+
+diff --git a/configure.ac b/configure.ac
+index baeee60..467af32 100644
+--- a/configure.ac
++++ b/configure.ac
+@@ -234,6 +234,24 @@ AC_SUBST(CRYPTO_TESTDIR)
+ AC_SUBST(LIBGCRYPT_CFLAGS)
+ AC_SUBST(LIBGCRYPT_LIBS)
+ 
++
++AC_ARG_WITH([ifm_libgcrypt],
++    [AS_HELP_STRING([--with-ifm_libgcrypt], [Enable IFM support with libgcrypt (default is no)])],
++    [use_ifm_libgcrypt="$withval"],
++    [use_ifm_libgcrypt="no"])
++
++if test "x$use_ifm_libgcrypt" = "xyes"; then
++    AC_MSG_WARN([IFM support with libgcrypt is enabled.])
++    PKG_CHECK_MODULES([IFM_LIBGCRYPT], [ifm_libgcrypt],
++        [LIBS="-lifm_libgcrypt $LIBS"
++        AC_DEFINE([USE_IFM_LIBGCRYPT], [1], [Define if IFM support with libgcrypt is enabled])],
++        [
++        AC_MSG_ERROR([Could not find IFM with libgcrypt library])
++        ])
++fi
++
++
++
+ AC_ARG_WITH(debug, [  --with-debug            Add the debugging code (on)])
+ if test "$with_debug" = "no" ; then
+     echo Disabling debug support
+diff --git a/libexslt/crypto.c b/libexslt/crypto.c
+index 8845a13..77dfa03 100644
+--- a/libexslt/crypto.c
++++ b/libexslt/crypto.c
+@@ -319,7 +319,15 @@ exsltCryptoCryptoApiRc4Decrypt (xmlXPathParserContextPtr ctxt,
+ #ifdef HAVE_SYS_SELECT_H
+ #include <sys/select.h>		/* needed by gcrypt.h 4 Jul 04 */
+ #endif
++#ifndef USE_IFM_LIBGCRYPT
+ #include <gcrypt.h>
++#else
++#include "ifm/ifm_gcrypt.h"
++#define gcry_md_handle gcry_uadk_sha2_hd
++#define gcry_md_hd_t gcry_uadk_sha2_hd_t
++#define gcry_cipher_handle gcry_uadk_aes_hd
++#define gcry_cipher_hd_t gcry_uadk_aes_hd_t
++#endif
+ 
+ static void
+ exsltCryptoGcryptInit (void) {
+-- 
+2.33.0
+
