@@ -1,0 +1,1318 @@
+From 3e68dc612eadd3f5e37efcd4ec728b0fac7ff583 Mon Sep 17 00:00:00 2001
+From: hugin1_1 <hugin1_1@sina.com>
+Date: Sun, 10 Dec 2023 20:09:22 +0800
+Subject: [PATCH] support-ifm-gcrypt-instead-of-gcrypt-in-gnupg2
+
+---
+ agent/agent.h           | 19 +++++++++++++++++++
+ common/compliance.c     | 19 +++++++++++++++++++
+ common/compliance.h     | 19 +++++++++++++++++++
+ common/init.c           | 19 +++++++++++++++++++
+ common/name-value.c     | 19 +++++++++++++++++++
+ common/simple-pwquery.h | 19 +++++++++++++++++++
+ common/util.h           | 21 ++++++++++++++++++++-
+ configure.ac            | 14 ++++++++++++++
+ dirmngr/dirmngr.h       | 19 +++++++++++++++++++
+ g10/gpg.h               | 19 +++++++++++++++++++
+ g13/g13-common.c        | 19 +++++++++++++++++++
+ g13/g13-syshelp.c       | 19 +++++++++++++++++++
+ g13/g13.c               | 19 +++++++++++++++++++
+ kbx/kbxutil.c           | 19 +++++++++++++++++++
+ kbx/keybox-blob.c       | 19 +++++++++++++++++++
+ kbx/keybox-dump.c       | 19 +++++++++++++++++++
+ kbx/keybox-openpgp.c    | 19 +++++++++++++++++++
+ kbx/keybox-search.c     | 19 +++++++++++++++++++
+ scd/scdaemon.c          | 19 +++++++++++++++++++
+ scd/scdaemon.h          | 19 +++++++++++++++++++
+ sm/call-agent.c         | 19 +++++++++++++++++++
+ sm/call-dirmngr.c       | 19 +++++++++++++++++++
+ sm/certchain.c          | 19 +++++++++++++++++++
+ sm/certcheck.c          | 19 +++++++++++++++++++
+ sm/certdump.c           | 19 +++++++++++++++++++
+ sm/certlist.c           | 19 +++++++++++++++++++
+ sm/certreqgen-ui.c      | 19 +++++++++++++++++++
+ sm/certreqgen.c         | 19 +++++++++++++++++++
+ sm/decrypt.c            | 19 +++++++++++++++++++
+ sm/delete.c             | 19 +++++++++++++++++++
+ sm/encrypt.c            | 19 +++++++++++++++++++
+ sm/export.c             | 19 +++++++++++++++++++
+ sm/fingerprint.c        | 19 +++++++++++++++++++
+ sm/gpgsm.c              | 19 +++++++++++++++++++
+ sm/import.c             | 19 +++++++++++++++++++
+ sm/keylist.c            | 19 +++++++++++++++++++
+ sm/minip12.c            | 19 +++++++++++++++++++
+ sm/minip12.h            | 19 +++++++++++++++++++
+ sm/sign.c               | 19 +++++++++++++++++++
+ sm/verify.c             | 19 +++++++++++++++++++
+ tests/gpgscm/main.c     | 19 +++++++++++++++++++
+ 41 files changed, 775 insertions(+), 1 deletion(-)
+
+diff --git a/agent/agent.h b/agent/agent.h
+index d84bb95..cc639ee 100644
+--- a/agent/agent.h
++++ b/agent/agent.h
+@@ -30,7 +30,26 @@
+         map_assuan_err_with_source (GPG_ERR_SOURCE_DEFAULT, (a))
+ #include <errno.h>
+ 
++
++#ifndef USE_IFM_GCRYPT
+ #include <gcrypt.h>
++#else
++#include "ifm/ifm_gcrypt.h"
++#undef gcry_md_putc
++#define gcry_md_putc(h,c)  \
++            do {                                          \
++                gcry_uadk_md_hd_t h__ = (h);                   \
++                if( (h__)->gcry_hd_t->bufpos == (h__)->gcry_hd_t->bufsize )     \
++                    gcry_md_write( (h__), NULL, 0 );      \
++                (h__)->gcry_hd_t->buf[(h__)->gcry_hd_t->bufpos++] = (c) & 0xff; \
++            } while(0)
++#define gcry_md_handle gcry_uadk_md_hd
++#define gcry_md_hd_t gcry_uadk_md_hd_t
++#define gcry_cipher_handle gcry_uadk_aes_hd
++#define gcry_cipher_hd_t gcry_uadk_aes_hd_t
++#endif
++
++
+ #include "../common/util.h"
+ #include "../common/membuf.h"
+ #include "../common/sysutils.h" /* (gnupg_fd_t) */
+diff --git a/common/compliance.c b/common/compliance.c
+index 1cda1ec..f06b7b9 100644
+--- a/common/compliance.c
++++ b/common/compliance.c
+@@ -29,7 +29,26 @@
+  */
+ 
+ #include <config.h>
++
++#ifndef USE_IFM_GCRYPT
+ #include <gcrypt.h>
++#else
++#include "ifm/ifm_gcrypt.h"
++#undef gcry_md_putc
++#define gcry_md_putc(h,c)  \
++            do {                                          \
++                gcry_uadk_md_hd_t h__ = (h);                   \
++                if( (h__)->gcry_hd_t->bufpos == (h__)->gcry_hd_t->bufsize )     \
++                    gcry_md_write( (h__), NULL, 0 );      \
++                (h__)->gcry_hd_t->buf[(h__)->gcry_hd_t->bufpos++] = (c) & 0xff; \
++            } while(0)
++#define gcry_md_handle gcry_uadk_md_hd
++#define gcry_md_hd_t gcry_uadk_md_hd_t
++#define gcry_cipher_handle gcry_uadk_aes_hd
++#define gcry_cipher_hd_t gcry_uadk_aes_hd_t
++#endif
++
++
+ 
+ #include "openpgpdefs.h"
+ #include "logging.h"
+diff --git a/common/compliance.h b/common/compliance.h
+index 20b562e..b7716d8 100644
+--- a/common/compliance.h
++++ b/common/compliance.h
+@@ -31,7 +31,26 @@
+ #ifndef GNUPG_COMMON_COMPLIANCE_H
+ #define GNUPG_COMMON_COMPLIANCE_H
+ 
++
++#ifndef USE_IFM_GCRYPT
+ #include <gcrypt.h>
++#else
++#include "ifm/ifm_gcrypt.h"
++#undef gcry_md_putc
++#define gcry_md_putc(h,c)  \
++            do {                                          \
++                gcry_uadk_md_hd_t h__ = (h);                   \
++                if( (h__)->gcry_hd_t->bufpos == (h__)->gcry_hd_t->bufsize )     \
++                    gcry_md_write( (h__), NULL, 0 );      \
++                (h__)->gcry_hd_t->buf[(h__)->gcry_hd_t->bufpos++] = (c) & 0xff; \
++            } while(0)
++#define gcry_md_handle gcry_uadk_md_hd
++#define gcry_md_hd_t gcry_uadk_md_hd_t
++#define gcry_cipher_handle gcry_uadk_aes_hd
++#define gcry_cipher_hd_t gcry_uadk_aes_hd_t
++#endif
++
++
+ #include "openpgpdefs.h"
+ 
+ void gnupg_initialize_compliance (int gnupg_module_name);
+diff --git a/common/init.c b/common/init.c
+index 0a12b25..e768909 100644
+--- a/common/init.c
++++ b/common/init.c
+@@ -39,7 +39,26 @@
+ # include <assuan.h> /* For _assuan_w32ce_finish_pipe. */
+ #endif
+ 
++
++#ifndef USE_IFM_GCRYPT
+ #include <gcrypt.h>
++#else
++#include "ifm/ifm_gcrypt.h"
++#undef gcry_md_putc
++#define gcry_md_putc(h,c)  \
++            do {                                          \
++                gcry_uadk_md_hd_t h__ = (h);                   \
++                if( (h__)->gcry_hd_t->bufpos == (h__)->gcry_hd_t->bufsize )     \
++                    gcry_md_write( (h__), NULL, 0 );      \
++                (h__)->gcry_hd_t->buf[(h__)->gcry_hd_t->bufpos++] = (c) & 0xff; \
++            } while(0)
++#define gcry_md_handle gcry_uadk_md_hd
++#define gcry_md_hd_t gcry_uadk_md_hd_t
++#define gcry_cipher_handle gcry_uadk_aes_hd
++#define gcry_cipher_hd_t gcry_uadk_aes_hd_t
++#endif
++
++
+ #include "util.h"
+ #include "i18n.h"
+ #include "w32help.h"
+diff --git a/common/name-value.c b/common/name-value.c
+index f97396b..aca2bad 100644
+--- a/common/name-value.c
++++ b/common/name-value.c
+@@ -34,7 +34,26 @@
+ 
+ #include <config.h>
+ #include <assert.h>
++
++#ifndef USE_IFM_GCRYPT
+ #include <gcrypt.h>
++#else
++#include "ifm/ifm_gcrypt.h"
++#undef gcry_md_putc
++#define gcry_md_putc(h,c)  \
++            do {                                          \
++                gcry_uadk_md_hd_t h__ = (h);                   \
++                if( (h__)->gcry_hd_t->bufpos == (h__)->gcry_hd_t->bufsize )     \
++                    gcry_md_write( (h__), NULL, 0 );      \
++                (h__)->gcry_hd_t->buf[(h__)->gcry_hd_t->bufpos++] = (c) & 0xff; \
++            } while(0)
++#define gcry_md_handle gcry_uadk_md_hd
++#define gcry_md_hd_t gcry_uadk_md_hd_t
++#define gcry_cipher_handle gcry_uadk_aes_hd
++#define gcry_cipher_hd_t gcry_uadk_aes_hd_t
++#endif
++
++
+ #include <gpg-error.h>
+ #include <string.h>
+ 
+diff --git a/common/simple-pwquery.h b/common/simple-pwquery.h
+index 9bbc53f..1b11151 100644
+--- a/common/simple-pwquery.h
++++ b/common/simple-pwquery.h
+@@ -23,7 +23,26 @@
+ #ifdef SIMPLE_PWQUERY_IMPLEMENTATION /* Begin configuration stuff. */
+ 
+ /* Include whatever files you need.  */
++
++#ifndef USE_IFM_GCRYPT
+ #include <gcrypt.h>
++#else
++#include "ifm/ifm_gcrypt.h"
++#undef gcry_md_putc
++#define gcry_md_putc(h,c)  \
++            do {                                          \
++                gcry_uadk_md_hd_t h__ = (h);                   \
++                if( (h__)->gcry_hd_t->bufpos == (h__)->gcry_hd_t->bufsize )     \
++                    gcry_md_write( (h__), NULL, 0 );      \
++                (h__)->gcry_hd_t->buf[(h__)->gcry_hd_t->bufpos++] = (c) & 0xff; \
++            } while(0)
++#define gcry_md_handle gcry_uadk_md_hd
++#define gcry_md_hd_t gcry_uadk_md_hd_t
++#define gcry_cipher_handle gcry_uadk_aes_hd
++#define gcry_cipher_hd_t gcry_uadk_aes_hd_t
++#endif
++
++
+ #include "../common/logging.h"
+ 
+ /* Try to write error message using the standard gnupg log mechanism.  */
+diff --git a/common/util.h b/common/util.h
+index 5778b7d..2e6259c 100644
+--- a/common/util.h
++++ b/common/util.h
+@@ -31,7 +31,26 @@
+ #ifndef GNUPG_COMMON_UTIL_H
+ #define GNUPG_COMMON_UTIL_H
+ 
+-#include <gcrypt.h> /* We need this for the memory function protos. */
++
++#ifndef USE_IFM_GCRYPT
++#include <gcrypt.h>
++#else
++#include "ifm/ifm_gcrypt.h"
++#undef gcry_md_putc
++#define gcry_md_putc(h,c)  \
++            do {                                          \
++                gcry_uadk_md_hd_t h__ = (h);                   \
++                if( (h__)->gcry_hd_t->bufpos == (h__)->gcry_hd_t->bufsize )     \
++                    gcry_md_write( (h__), NULL, 0 );      \
++                (h__)->gcry_hd_t->buf[(h__)->gcry_hd_t->bufpos++] = (c) & 0xff; \
++            } while(0)
++#define gcry_md_handle gcry_uadk_md_hd
++#define gcry_md_hd_t gcry_uadk_md_hd_t
++#define gcry_cipher_handle gcry_uadk_aes_hd
++#define gcry_cipher_hd_t gcry_uadk_aes_hd_t
++#endif
++
++ /* We need this for the memory function protos. */
+ #include <errno.h>  /* We need errno.  */
+ #include <gpg-error.h> /* We need gpg_error_t and estream. */
+ 
+diff --git a/configure.ac b/configure.ac
+index 3d69e90..3c9c1e1 100644
+--- a/configure.ac
++++ b/configure.ac
+@@ -208,6 +208,20 @@ show_gnupg_dirmngr_ldap_pgm="(default)"
+ test -n "$GNUPG_DIRMNGR_LDAP_PGM" \
+       && show_gnupg_dirmngr_ldap_pgm="$GNUPG_DIRMNGR_LDAP_PGM"
+ 
++AC_ARG_WITH([ifm-gcrypt],
++    [AS_HELP_STRING([--with-ifm-gcrypt], [Enable IFM support with gcrypt (default is no)])],
++    [use_ifm_gcrypt="$withval"],
++    [use_ifm_gcrypt="no"])
++
++if test "$use_ifm_gcrypt" = "yes"; then
++    AC_MSG_WARN([IFM support with gcrypt is enabled.])
++    PKG_CHECK_MODULES([IFM_LIBGRYPT], [ifm_libgcrypt],
++        [LIBS="-lifm_libgcrypt $LIBS"
++        AC_DEFINE([USE_IFM_GCRYPT], [1], [Define if IFM support with gcrypt is enabled])],
++        [
++        AC_MSG_ERROR([Could not find IFM with gcrypt library])
++        ])
++fi
+ 
+ #
+ # For a long time gpg 2.x was installed as gpg2.  This changed with
+diff --git a/dirmngr/dirmngr.h b/dirmngr/dirmngr.h
+index 69d8270..36778b6 100644
+--- a/dirmngr/dirmngr.h
++++ b/dirmngr/dirmngr.h
+@@ -28,7 +28,26 @@
+ #define map_assuan_err(a) \
+         map_assuan_err_with_source (GPG_ERR_SOURCE_DEFAULT, (a))
+ #include <errno.h>
++
++#ifndef USE_IFM_GCRYPT
+ #include <gcrypt.h>
++#else
++#include "ifm/ifm_gcrypt.h"
++#undef gcry_md_putc
++#define gcry_md_putc(h,c)  \
++            do {                                          \
++                gcry_uadk_md_hd_t h__ = (h);                   \
++                if( (h__)->gcry_hd_t->bufpos == (h__)->gcry_hd_t->bufsize )     \
++                    gcry_md_write( (h__), NULL, 0 );      \
++                (h__)->gcry_hd_t->buf[(h__)->gcry_hd_t->bufpos++] = (c) & 0xff; \
++            } while(0)
++#define gcry_md_handle gcry_uadk_md_hd
++#define gcry_md_hd_t gcry_uadk_md_hd_t
++#define gcry_cipher_handle gcry_uadk_aes_hd
++#define gcry_cipher_hd_t gcry_uadk_aes_hd_t
++#endif
++
++
+ #include <ksba.h>
+ 
+ #include "../common/util.h"
+diff --git a/g10/gpg.h b/g10/gpg.h
+index 1bad551..21d9203 100644
+--- a/g10/gpg.h
++++ b/g10/gpg.h
+@@ -35,7 +35,26 @@
+ #define map_assuan_err(a) \
+         map_assuan_err_with_source (GPG_ERR_SOURCE_DEFAULT, (a))
+ #include <gpg-error.h>
++
++#ifndef USE_IFM_GCRYPT
+ #include <gcrypt.h>
++#else
++#include "ifm/ifm_gcrypt.h"
++#undef gcry_md_putc
++#define gcry_md_putc(h,c)  \
++            do {                                          \
++                gcry_uadk_md_hd_t h__ = (h);                   \
++                if( (h__)->gcry_hd_t->bufpos == (h__)->gcry_hd_t->bufsize )     \
++                    gcry_md_write( (h__), NULL, 0 );      \
++                (h__)->gcry_hd_t->buf[(h__)->gcry_hd_t->bufpos++] = (c) & 0xff; \
++            } while(0)
++#define gcry_md_handle gcry_uadk_md_hd
++#define gcry_md_hd_t gcry_uadk_md_hd_t
++#define gcry_cipher_handle gcry_uadk_aes_hd
++#define gcry_cipher_hd_t gcry_uadk_aes_hd_t
++#endif
++
++
+ 
+ 
+ /* Number of bits we accept when reading or writing MPIs. */
+diff --git a/g13/g13-common.c b/g13/g13-common.c
+index 35cb131..06f96d1 100644
+--- a/g13/g13-common.c
++++ b/g13/g13-common.c
+@@ -27,7 +27,26 @@
+ #include <assert.h>
+ 
+ #include "g13-common.h"
++
++#ifndef USE_IFM_GCRYPT
+ #include <gcrypt.h>
++#else
++#include "ifm/ifm_gcrypt.h"
++#undef gcry_md_putc
++#define gcry_md_putc(h,c)  \
++            do {                                          \
++                gcry_uadk_md_hd_t h__ = (h);                   \
++                if( (h__)->gcry_hd_t->bufpos == (h__)->gcry_hd_t->bufsize )     \
++                    gcry_md_write( (h__), NULL, 0 );      \
++                (h__)->gcry_hd_t->buf[(h__)->gcry_hd_t->bufpos++] = (c) & 0xff; \
++            } while(0)
++#define gcry_md_handle gcry_uadk_md_hd
++#define gcry_md_hd_t gcry_uadk_md_hd_t
++#define gcry_cipher_handle gcry_uadk_aes_hd
++#define gcry_cipher_hd_t gcry_uadk_aes_hd_t
++#endif
++
++
+ #include <assuan.h>
+ #include "../common/i18n.h"
+ #include "../common/sysutils.h"
+diff --git a/g13/g13-syshelp.c b/g13/g13-syshelp.c
+index 65d5c25..facf608 100644
+--- a/g13/g13-syshelp.c
++++ b/g13/g13-syshelp.c
+@@ -35,7 +35,26 @@
+ #define INCLUDED_BY_MAIN_MODULE 1
+ #include "g13-syshelp.h"
+ 
++
++#ifndef USE_IFM_GCRYPT
+ #include <gcrypt.h>
++#else
++#include "ifm/ifm_gcrypt.h"
++#undef gcry_md_putc
++#define gcry_md_putc(h,c)  \
++            do {                                          \
++                gcry_uadk_md_hd_t h__ = (h);                   \
++                if( (h__)->gcry_hd_t->bufpos == (h__)->gcry_hd_t->bufsize )     \
++                    gcry_md_write( (h__), NULL, 0 );      \
++                (h__)->gcry_hd_t->buf[(h__)->gcry_hd_t->bufpos++] = (c) & 0xff; \
++            } while(0)
++#define gcry_md_handle gcry_uadk_md_hd
++#define gcry_md_hd_t gcry_uadk_md_hd_t
++#define gcry_cipher_handle gcry_uadk_aes_hd
++#define gcry_cipher_hd_t gcry_uadk_aes_hd_t
++#endif
++
++
+ #include <assuan.h>
+ 
+ #include "../common/i18n.h"
+diff --git a/g13/g13.c b/g13/g13.c
+index 6500916..db27bba 100644
+--- a/g13/g13.c
++++ b/g13/g13.c
+@@ -31,7 +31,26 @@
+ #define INCLUDED_BY_MAIN_MODULE 1
+ #include "g13.h"
+ 
++
++#ifndef USE_IFM_GCRYPT
+ #include <gcrypt.h>
++#else
++#include "ifm/ifm_gcrypt.h"
++#undef gcry_md_putc
++#define gcry_md_putc(h,c)  \
++            do {                                          \
++                gcry_uadk_md_hd_t h__ = (h);                   \
++                if( (h__)->gcry_hd_t->bufpos == (h__)->gcry_hd_t->bufsize )     \
++                    gcry_md_write( (h__), NULL, 0 );      \
++                (h__)->gcry_hd_t->buf[(h__)->gcry_hd_t->bufpos++] = (c) & 0xff; \
++            } while(0)
++#define gcry_md_handle gcry_uadk_md_hd
++#define gcry_md_hd_t gcry_uadk_md_hd_t
++#define gcry_cipher_handle gcry_uadk_aes_hd
++#define gcry_cipher_hd_t gcry_uadk_aes_hd_t
++#endif
++
++
+ #include <assuan.h>
+ 
+ #include "../common/i18n.h"
+diff --git a/kbx/kbxutil.c b/kbx/kbxutil.c
+index 9e05de4..84c1c9c 100644
+--- a/kbx/kbxutil.c
++++ b/kbx/kbxutil.c
+@@ -36,7 +36,26 @@
+ #include "../common/i18n.h"
+ #include "keybox-defs.h"
+ #include "../common/init.h"
++
++#ifndef USE_IFM_GCRYPT
+ #include <gcrypt.h>
++#else
++#include "ifm/ifm_gcrypt.h"
++#undef gcry_md_putc
++#define gcry_md_putc(h,c)  \
++            do {                                          \
++                gcry_uadk_md_hd_t h__ = (h);                   \
++                if( (h__)->gcry_hd_t->bufpos == (h__)->gcry_hd_t->bufsize )     \
++                    gcry_md_write( (h__), NULL, 0 );      \
++                (h__)->gcry_hd_t->buf[(h__)->gcry_hd_t->bufpos++] = (c) & 0xff; \
++            } while(0)
++#define gcry_md_handle gcry_uadk_md_hd
++#define gcry_md_hd_t gcry_uadk_md_hd_t
++#define gcry_cipher_handle gcry_uadk_aes_hd
++#define gcry_cipher_hd_t gcry_uadk_aes_hd_t
++#endif
++
++
+ 
+ 
+ enum cmd_and_opt_values {
+diff --git a/kbx/keybox-blob.c b/kbx/keybox-blob.c
+index ac259ea..e07aade 100644
+--- a/kbx/keybox-blob.c
++++ b/kbx/keybox-blob.c
+@@ -147,7 +147,26 @@
+ #include <time.h>
+ 
+ #include "keybox-defs.h"
++
++#ifndef USE_IFM_GCRYPT
+ #include <gcrypt.h>
++#else
++#include "ifm/ifm_gcrypt.h"
++#undef gcry_md_putc
++#define gcry_md_putc(h,c)  \
++            do {                                          \
++                gcry_uadk_md_hd_t h__ = (h);                   \
++                if( (h__)->gcry_hd_t->bufpos == (h__)->gcry_hd_t->bufsize )     \
++                    gcry_md_write( (h__), NULL, 0 );      \
++                (h__)->gcry_hd_t->buf[(h__)->gcry_hd_t->bufpos++] = (c) & 0xff; \
++            } while(0)
++#define gcry_md_handle gcry_uadk_md_hd
++#define gcry_md_hd_t gcry_uadk_md_hd_t
++#define gcry_cipher_handle gcry_uadk_aes_hd
++#define gcry_cipher_hd_t gcry_uadk_aes_hd_t
++#endif
++
++
+ 
+ #ifdef KEYBOX_WITH_X509
+ #include <ksba.h>
+diff --git a/kbx/keybox-dump.c b/kbx/keybox-dump.c
+index 3e66b72..1f62634 100644
+--- a/kbx/keybox-dump.c
++++ b/kbx/keybox-dump.c
+@@ -24,7 +24,26 @@
+ #include <errno.h>
+ 
+ #include "keybox-defs.h"
++
++#ifndef USE_IFM_GCRYPT
+ #include <gcrypt.h>
++#else
++#include "ifm/ifm_gcrypt.h"
++#undef gcry_md_putc
++#define gcry_md_putc(h,c)  \
++            do {                                          \
++                gcry_uadk_md_hd_t h__ = (h);                   \
++                if( (h__)->gcry_hd_t->bufpos == (h__)->gcry_hd_t->bufsize )     \
++                    gcry_md_write( (h__), NULL, 0 );      \
++                (h__)->gcry_hd_t->buf[(h__)->gcry_hd_t->bufpos++] = (c) & 0xff; \
++            } while(0)
++#define gcry_md_handle gcry_uadk_md_hd
++#define gcry_md_hd_t gcry_uadk_md_hd_t
++#define gcry_cipher_handle gcry_uadk_aes_hd
++#define gcry_cipher_hd_t gcry_uadk_aes_hd_t
++#endif
++
++
+ #include "../common/host2net.h"
+ 
+ /* Argg, we can't include ../common/util.h */
+diff --git a/kbx/keybox-openpgp.c b/kbx/keybox-openpgp.c
+index 8ded683..187ab0e 100644
+--- a/kbx/keybox-openpgp.c
++++ b/kbx/keybox-openpgp.c
+@@ -33,7 +33,26 @@
+ 
+ #include "keybox-defs.h"
+ 
++
++#ifndef USE_IFM_GCRYPT
+ #include <gcrypt.h>
++#else
++#include "ifm/ifm_gcrypt.h"
++#undef gcry_md_putc
++#define gcry_md_putc(h,c)  \
++            do {                                          \
++                gcry_uadk_md_hd_t h__ = (h);                   \
++                if( (h__)->gcry_hd_t->bufpos == (h__)->gcry_hd_t->bufsize )     \
++                    gcry_md_write( (h__), NULL, 0 );      \
++                (h__)->gcry_hd_t->buf[(h__)->gcry_hd_t->bufpos++] = (c) & 0xff; \
++            } while(0)
++#define gcry_md_handle gcry_uadk_md_hd
++#define gcry_md_hd_t gcry_uadk_md_hd_t
++#define gcry_cipher_handle gcry_uadk_aes_hd
++#define gcry_cipher_hd_t gcry_uadk_aes_hd_t
++#endif
++
++
+ 
+ #include "../common/openpgpdefs.h"
+ #include "../common/host2net.h"
+diff --git a/kbx/keybox-search.c b/kbx/keybox-search.c
+index 263a166..6eb7f6a 100644
+--- a/kbx/keybox-search.c
++++ b/kbx/keybox-search.c
+@@ -26,7 +26,26 @@
+ #include <errno.h>
+ 
+ #include "keybox-defs.h"
++
++#ifndef USE_IFM_GCRYPT
+ #include <gcrypt.h>
++#else
++#include "ifm/ifm_gcrypt.h"
++#undef gcry_md_putc
++#define gcry_md_putc(h,c)  \
++            do {                                          \
++                gcry_uadk_md_hd_t h__ = (h);                   \
++                if( (h__)->gcry_hd_t->bufpos == (h__)->gcry_hd_t->bufsize )     \
++                    gcry_md_write( (h__), NULL, 0 );      \
++                (h__)->gcry_hd_t->buf[(h__)->gcry_hd_t->bufpos++] = (c) & 0xff; \
++            } while(0)
++#define gcry_md_handle gcry_uadk_md_hd
++#define gcry_md_hd_t gcry_uadk_md_hd_t
++#define gcry_cipher_handle gcry_uadk_aes_hd
++#define gcry_cipher_hd_t gcry_uadk_aes_hd_t
++#endif
++
++
+ #include "../common/host2net.h"
+ #include "../common/mbox-util.h"
+ 
+diff --git a/scd/scdaemon.c b/scd/scdaemon.c
+index 5491556..baf7dfb 100644
+--- a/scd/scdaemon.c
++++ b/scd/scdaemon.c
+@@ -42,7 +42,26 @@
+ #define GNUPG_COMMON_NEED_AFLOCAL
+ #include "scdaemon.h"
+ #include <ksba.h>
++
++#ifndef USE_IFM_GCRYPT
+ #include <gcrypt.h>
++#else
++#include "ifm/ifm_gcrypt.h"
++#undef gcry_md_putc
++#define gcry_md_putc(h,c)  \
++            do {                                          \
++                gcry_uadk_md_hd_t h__ = (h);                   \
++                if( (h__)->gcry_hd_t->bufpos == (h__)->gcry_hd_t->bufsize )     \
++                    gcry_md_write( (h__), NULL, 0 );      \
++                (h__)->gcry_hd_t->buf[(h__)->gcry_hd_t->bufpos++] = (c) & 0xff; \
++            } while(0)
++#define gcry_md_handle gcry_uadk_md_hd
++#define gcry_md_hd_t gcry_uadk_md_hd_t
++#define gcry_cipher_handle gcry_uadk_aes_hd
++#define gcry_cipher_hd_t gcry_uadk_aes_hd_t
++#endif
++
++
+ 
+ #include <assuan.h> /* malloc hooks */
+ 
+diff --git a/scd/scdaemon.h b/scd/scdaemon.h
+index 3ba1b9a..bb32082 100644
+--- a/scd/scdaemon.h
++++ b/scd/scdaemon.h
+@@ -27,7 +27,26 @@
+ #include <gpg-error.h>
+ 
+ #include <time.h>
++
++#ifndef USE_IFM_GCRYPT
+ #include <gcrypt.h>
++#else
++#include "ifm/ifm_gcrypt.h"
++#undef gcry_md_putc
++#define gcry_md_putc(h,c)  \
++            do {                                          \
++                gcry_uadk_md_hd_t h__ = (h);                   \
++                if( (h__)->gcry_hd_t->bufpos == (h__)->gcry_hd_t->bufsize )     \
++                    gcry_md_write( (h__), NULL, 0 );      \
++                (h__)->gcry_hd_t->buf[(h__)->gcry_hd_t->bufpos++] = (c) & 0xff; \
++            } while(0)
++#define gcry_md_handle gcry_uadk_md_hd
++#define gcry_md_hd_t gcry_uadk_md_hd_t
++#define gcry_cipher_handle gcry_uadk_aes_hd
++#define gcry_cipher_hd_t gcry_uadk_aes_hd_t
++#endif
++
++
+ #include "../common/util.h"
+ #include "../common/sysutils.h"
+ #include "app-common.h"
+diff --git a/sm/call-agent.c b/sm/call-agent.c
+index a5b17e9..89d76a6 100644
+--- a/sm/call-agent.c
++++ b/sm/call-agent.c
+@@ -31,7 +31,26 @@
+ #endif
+ 
+ #include "gpgsm.h"
++
++#ifndef USE_IFM_GCRYPT
+ #include <gcrypt.h>
++#else
++#include "ifm/ifm_gcrypt.h"
++#undef gcry_md_putc
++#define gcry_md_putc(h,c)  \
++            do {                                          \
++                gcry_uadk_md_hd_t h__ = (h);                   \
++                if( (h__)->gcry_hd_t->bufpos == (h__)->gcry_hd_t->bufsize )     \
++                    gcry_md_write( (h__), NULL, 0 );      \
++                (h__)->gcry_hd_t->buf[(h__)->gcry_hd_t->bufpos++] = (c) & 0xff; \
++            } while(0)
++#define gcry_md_handle gcry_uadk_md_hd
++#define gcry_md_hd_t gcry_uadk_md_hd_t
++#define gcry_cipher_handle gcry_uadk_aes_hd
++#define gcry_cipher_hd_t gcry_uadk_aes_hd_t
++#endif
++
++
+ #include <assuan.h>
+ #include "../common/i18n.h"
+ #include "../common/asshelp.h"
+diff --git a/sm/call-dirmngr.c b/sm/call-dirmngr.c
+index 1a411f2..88e988d 100644
+--- a/sm/call-dirmngr.c
++++ b/sm/call-dirmngr.c
+@@ -29,7 +29,26 @@
+ #include <ctype.h>
+ 
+ #include "gpgsm.h"
++
++#ifndef USE_IFM_GCRYPT
+ #include <gcrypt.h>
++#else
++#include "ifm/ifm_gcrypt.h"
++#undef gcry_md_putc
++#define gcry_md_putc(h,c)  \
++            do {                                          \
++                gcry_uadk_md_hd_t h__ = (h);                   \
++                if( (h__)->gcry_hd_t->bufpos == (h__)->gcry_hd_t->bufsize )     \
++                    gcry_md_write( (h__), NULL, 0 );      \
++                (h__)->gcry_hd_t->buf[(h__)->gcry_hd_t->bufpos++] = (c) & 0xff; \
++            } while(0)
++#define gcry_md_handle gcry_uadk_md_hd
++#define gcry_md_hd_t gcry_uadk_md_hd_t
++#define gcry_cipher_handle gcry_uadk_aes_hd
++#define gcry_cipher_hd_t gcry_uadk_aes_hd_t
++#endif
++
++
+ #include <assuan.h>
+ 
+ #include "../common/i18n.h"
+diff --git a/sm/certchain.c b/sm/certchain.c
+index d2a1800..f130a2b 100644
+--- a/sm/certchain.c
++++ b/sm/certchain.c
+@@ -29,7 +29,26 @@
+ #include <assert.h>
+ 
+ #include "gpgsm.h"
++
++#ifndef USE_IFM_GCRYPT
+ #include <gcrypt.h>
++#else
++#include "ifm/ifm_gcrypt.h"
++#undef gcry_md_putc
++#define gcry_md_putc(h,c)  \
++            do {                                          \
++                gcry_uadk_md_hd_t h__ = (h);                   \
++                if( (h__)->gcry_hd_t->bufpos == (h__)->gcry_hd_t->bufsize )     \
++                    gcry_md_write( (h__), NULL, 0 );      \
++                (h__)->gcry_hd_t->buf[(h__)->gcry_hd_t->bufpos++] = (c) & 0xff; \
++            } while(0)
++#define gcry_md_handle gcry_uadk_md_hd
++#define gcry_md_hd_t gcry_uadk_md_hd_t
++#define gcry_cipher_handle gcry_uadk_aes_hd
++#define gcry_cipher_hd_t gcry_uadk_aes_hd_t
++#endif
++
++
+ #include <ksba.h>
+ 
+ #include "keydb.h"
+diff --git a/sm/certcheck.c b/sm/certcheck.c
+index d6b967c..c1dc4be 100644
+--- a/sm/certcheck.c
++++ b/sm/certcheck.c
+@@ -30,7 +30,26 @@
+ #include <assert.h>
+ 
+ #include "gpgsm.h"
++
++#ifndef USE_IFM_GCRYPT
+ #include <gcrypt.h>
++#else
++#include "ifm/ifm_gcrypt.h"
++#undef gcry_md_putc
++#define gcry_md_putc(h,c)  \
++            do {                                          \
++                gcry_uadk_md_hd_t h__ = (h);                   \
++                if( (h__)->gcry_hd_t->bufpos == (h__)->gcry_hd_t->bufsize )     \
++                    gcry_md_write( (h__), NULL, 0 );      \
++                (h__)->gcry_hd_t->buf[(h__)->gcry_hd_t->bufpos++] = (c) & 0xff; \
++            } while(0)
++#define gcry_md_handle gcry_uadk_md_hd
++#define gcry_md_hd_t gcry_uadk_md_hd_t
++#define gcry_cipher_handle gcry_uadk_aes_hd
++#define gcry_cipher_hd_t gcry_uadk_aes_hd_t
++#endif
++
++
+ #include <ksba.h>
+ 
+ #include "keydb.h"
+diff --git a/sm/certdump.c b/sm/certdump.c
+index 57e8112..d1df1cf 100644
+--- a/sm/certdump.c
++++ b/sm/certdump.c
+@@ -33,7 +33,26 @@
+ #endif
+ 
+ #include "gpgsm.h"
++
++#ifndef USE_IFM_GCRYPT
+ #include <gcrypt.h>
++#else
++#include "ifm/ifm_gcrypt.h"
++#undef gcry_md_putc
++#define gcry_md_putc(h,c)  \
++            do {                                          \
++                gcry_uadk_md_hd_t h__ = (h);                   \
++                if( (h__)->gcry_hd_t->bufpos == (h__)->gcry_hd_t->bufsize )     \
++                    gcry_md_write( (h__), NULL, 0 );      \
++                (h__)->gcry_hd_t->buf[(h__)->gcry_hd_t->bufpos++] = (c) & 0xff; \
++            } while(0)
++#define gcry_md_handle gcry_uadk_md_hd
++#define gcry_md_hd_t gcry_uadk_md_hd_t
++#define gcry_cipher_handle gcry_uadk_aes_hd
++#define gcry_cipher_hd_t gcry_uadk_aes_hd_t
++#endif
++
++
+ #include <ksba.h>
+ 
+ #include "keydb.h"
+diff --git a/sm/certlist.c b/sm/certlist.c
+index c3e4e82..e3e20f4 100644
+--- a/sm/certlist.c
++++ b/sm/certlist.c
+@@ -28,7 +28,26 @@
+ #include <assert.h>
+ 
+ #include "gpgsm.h"
++
++#ifndef USE_IFM_GCRYPT
+ #include <gcrypt.h>
++#else
++#include "ifm/ifm_gcrypt.h"
++#undef gcry_md_putc
++#define gcry_md_putc(h,c)  \
++            do {                                          \
++                gcry_uadk_md_hd_t h__ = (h);                   \
++                if( (h__)->gcry_hd_t->bufpos == (h__)->gcry_hd_t->bufsize )     \
++                    gcry_md_write( (h__), NULL, 0 );      \
++                (h__)->gcry_hd_t->buf[(h__)->gcry_hd_t->bufpos++] = (c) & 0xff; \
++            } while(0)
++#define gcry_md_handle gcry_uadk_md_hd
++#define gcry_md_hd_t gcry_uadk_md_hd_t
++#define gcry_cipher_handle gcry_uadk_aes_hd
++#define gcry_cipher_hd_t gcry_uadk_aes_hd_t
++#endif
++
++
+ #include <ksba.h>
+ 
+ #include "keydb.h"
+diff --git a/sm/certreqgen-ui.c b/sm/certreqgen-ui.c
+index d75b017..ecfa9ef 100644
+--- a/sm/certreqgen-ui.c
++++ b/sm/certreqgen-ui.c
+@@ -27,7 +27,26 @@
+ #include <assert.h>
+ 
+ #include "gpgsm.h"
++
++#ifndef USE_IFM_GCRYPT
+ #include <gcrypt.h>
++#else
++#include "ifm/ifm_gcrypt.h"
++#undef gcry_md_putc
++#define gcry_md_putc(h,c)  \
++            do {                                          \
++                gcry_uadk_md_hd_t h__ = (h);                   \
++                if( (h__)->gcry_hd_t->bufpos == (h__)->gcry_hd_t->bufsize )     \
++                    gcry_md_write( (h__), NULL, 0 );      \
++                (h__)->gcry_hd_t->buf[(h__)->gcry_hd_t->bufpos++] = (c) & 0xff; \
++            } while(0)
++#define gcry_md_handle gcry_uadk_md_hd
++#define gcry_md_hd_t gcry_uadk_md_hd_t
++#define gcry_cipher_handle gcry_uadk_aes_hd
++#define gcry_cipher_hd_t gcry_uadk_aes_hd_t
++#endif
++
++
+ 
+ #include "../common/i18n.h"
+ #include "../common/ttyio.h"
+diff --git a/sm/certreqgen.c b/sm/certreqgen.c
+index 92d6ffe..097aab2 100644
+--- a/sm/certreqgen.c
++++ b/sm/certreqgen.c
+@@ -62,7 +62,26 @@
+ #include <assert.h>
+ 
+ #include "gpgsm.h"
++
++#ifndef USE_IFM_GCRYPT
+ #include <gcrypt.h>
++#else
++#include "ifm/ifm_gcrypt.h"
++#undef gcry_md_putc
++#define gcry_md_putc(h,c)  \
++            do {                                          \
++                gcry_uadk_md_hd_t h__ = (h);                   \
++                if( (h__)->gcry_hd_t->bufpos == (h__)->gcry_hd_t->bufsize )     \
++                    gcry_md_write( (h__), NULL, 0 );      \
++                (h__)->gcry_hd_t->buf[(h__)->gcry_hd_t->bufpos++] = (c) & 0xff; \
++            } while(0)
++#define gcry_md_handle gcry_uadk_md_hd
++#define gcry_md_hd_t gcry_uadk_md_hd_t
++#define gcry_cipher_handle gcry_uadk_aes_hd
++#define gcry_cipher_hd_t gcry_uadk_aes_hd_t
++#endif
++
++
+ #include <ksba.h>
+ 
+ #include "keydb.h"
+diff --git a/sm/decrypt.c b/sm/decrypt.c
+index 38aa832..246eaf9 100644
+--- a/sm/decrypt.c
++++ b/sm/decrypt.c
+@@ -30,7 +30,26 @@
+ #include <assert.h>
+ 
+ #include "gpgsm.h"
++
++#ifndef USE_IFM_GCRYPT
+ #include <gcrypt.h>
++#else
++#include "ifm/ifm_gcrypt.h"
++#undef gcry_md_putc
++#define gcry_md_putc(h,c)  \
++            do {                                          \
++                gcry_uadk_md_hd_t h__ = (h);                   \
++                if( (h__)->gcry_hd_t->bufpos == (h__)->gcry_hd_t->bufsize )     \
++                    gcry_md_write( (h__), NULL, 0 );      \
++                (h__)->gcry_hd_t->buf[(h__)->gcry_hd_t->bufpos++] = (c) & 0xff; \
++            } while(0)
++#define gcry_md_handle gcry_uadk_md_hd
++#define gcry_md_hd_t gcry_uadk_md_hd_t
++#define gcry_cipher_handle gcry_uadk_aes_hd
++#define gcry_cipher_hd_t gcry_uadk_aes_hd_t
++#endif
++
++
+ #include <ksba.h>
+ 
+ #include "keydb.h"
+diff --git a/sm/delete.c b/sm/delete.c
+index 56d5b1f..6d196f8 100644
+--- a/sm/delete.c
++++ b/sm/delete.c
+@@ -27,7 +27,26 @@
+ #include <assert.h>
+ 
+ #include "gpgsm.h"
++
++#ifndef USE_IFM_GCRYPT
+ #include <gcrypt.h>
++#else
++#include "ifm/ifm_gcrypt.h"
++#undef gcry_md_putc
++#define gcry_md_putc(h,c)  \
++            do {                                          \
++                gcry_uadk_md_hd_t h__ = (h);                   \
++                if( (h__)->gcry_hd_t->bufpos == (h__)->gcry_hd_t->bufsize )     \
++                    gcry_md_write( (h__), NULL, 0 );      \
++                (h__)->gcry_hd_t->buf[(h__)->gcry_hd_t->bufpos++] = (c) & 0xff; \
++            } while(0)
++#define gcry_md_handle gcry_uadk_md_hd
++#define gcry_md_hd_t gcry_uadk_md_hd_t
++#define gcry_cipher_handle gcry_uadk_aes_hd
++#define gcry_cipher_hd_t gcry_uadk_aes_hd_t
++#endif
++
++
+ #include <ksba.h>
+ 
+ #include "keydb.h"
+diff --git a/sm/encrypt.c b/sm/encrypt.c
+index 37cfe92..f86d65d 100644
+--- a/sm/encrypt.c
++++ b/sm/encrypt.c
+@@ -28,7 +28,26 @@
+ #include <assert.h>
+ 
+ #include "gpgsm.h"
++
++#ifndef USE_IFM_GCRYPT
+ #include <gcrypt.h>
++#else
++#include "ifm/ifm_gcrypt.h"
++#undef gcry_md_putc
++#define gcry_md_putc(h,c)  \
++            do {                                          \
++                gcry_uadk_md_hd_t h__ = (h);                   \
++                if( (h__)->gcry_hd_t->bufpos == (h__)->gcry_hd_t->bufsize )     \
++                    gcry_md_write( (h__), NULL, 0 );      \
++                (h__)->gcry_hd_t->buf[(h__)->gcry_hd_t->bufpos++] = (c) & 0xff; \
++            } while(0)
++#define gcry_md_handle gcry_uadk_md_hd
++#define gcry_md_hd_t gcry_uadk_md_hd_t
++#define gcry_cipher_handle gcry_uadk_aes_hd
++#define gcry_cipher_hd_t gcry_uadk_aes_hd_t
++#endif
++
++
+ #include <ksba.h>
+ 
+ #include "keydb.h"
+diff --git a/sm/export.c b/sm/export.c
+index 3da06d7..600af6f 100644
+--- a/sm/export.c
++++ b/sm/export.c
+@@ -27,7 +27,26 @@
+ #include <assert.h>
+ 
+ #include "gpgsm.h"
++
++#ifndef USE_IFM_GCRYPT
+ #include <gcrypt.h>
++#else
++#include "ifm/ifm_gcrypt.h"
++#undef gcry_md_putc
++#define gcry_md_putc(h,c)  \
++            do {                                          \
++                gcry_uadk_md_hd_t h__ = (h);                   \
++                if( (h__)->gcry_hd_t->bufpos == (h__)->gcry_hd_t->bufsize )     \
++                    gcry_md_write( (h__), NULL, 0 );      \
++                (h__)->gcry_hd_t->buf[(h__)->gcry_hd_t->bufpos++] = (c) & 0xff; \
++            } while(0)
++#define gcry_md_handle gcry_uadk_md_hd
++#define gcry_md_hd_t gcry_uadk_md_hd_t
++#define gcry_cipher_handle gcry_uadk_aes_hd
++#define gcry_cipher_hd_t gcry_uadk_aes_hd_t
++#endif
++
++
+ #include <ksba.h>
+ 
+ #include "keydb.h"
+diff --git a/sm/fingerprint.c b/sm/fingerprint.c
+index 2e01cf1..ec2d6c8 100644
+--- a/sm/fingerprint.c
++++ b/sm/fingerprint.c
+@@ -28,7 +28,26 @@
+ 
+ 
+ #include "gpgsm.h"
++
++#ifndef USE_IFM_GCRYPT
+ #include <gcrypt.h>
++#else
++#include "ifm/ifm_gcrypt.h"
++#undef gcry_md_putc
++#define gcry_md_putc(h,c)  \
++            do {                                          \
++                gcry_uadk_md_hd_t h__ = (h);                   \
++                if( (h__)->gcry_hd_t->bufpos == (h__)->gcry_hd_t->bufsize )     \
++                    gcry_md_write( (h__), NULL, 0 );      \
++                (h__)->gcry_hd_t->buf[(h__)->gcry_hd_t->bufpos++] = (c) & 0xff; \
++            } while(0)
++#define gcry_md_handle gcry_uadk_md_hd
++#define gcry_md_hd_t gcry_uadk_md_hd_t
++#define gcry_cipher_handle gcry_uadk_aes_hd
++#define gcry_cipher_hd_t gcry_uadk_aes_hd_t
++#endif
++
++
+ #include <ksba.h>
+ 
+ #include "../common/host2net.h"
+diff --git a/sm/gpgsm.c b/sm/gpgsm.c
+index 5c1f0bb..cfc6ab9 100644
+--- a/sm/gpgsm.c
++++ b/sm/gpgsm.c
+@@ -32,7 +32,26 @@
+ #define INCLUDED_BY_MAIN_MODULE 1
+ 
+ #include "gpgsm.h"
++
++#ifndef USE_IFM_GCRYPT
+ #include <gcrypt.h>
++#else
++#include "ifm/ifm_gcrypt.h"
++#undef gcry_md_putc
++#define gcry_md_putc(h,c)  \
++            do {                                          \
++                gcry_uadk_md_hd_t h__ = (h);                   \
++                if( (h__)->gcry_hd_t->bufpos == (h__)->gcry_hd_t->bufsize )     \
++                    gcry_md_write( (h__), NULL, 0 );      \
++                (h__)->gcry_hd_t->buf[(h__)->gcry_hd_t->bufpos++] = (c) & 0xff; \
++            } while(0)
++#define gcry_md_handle gcry_uadk_md_hd
++#define gcry_md_hd_t gcry_uadk_md_hd_t
++#define gcry_cipher_handle gcry_uadk_aes_hd
++#define gcry_cipher_hd_t gcry_uadk_aes_hd_t
++#endif
++
++
+ #include <assuan.h> /* malloc hooks */
+ 
+ #include "passphrase.h"
+diff --git a/sm/import.c b/sm/import.c
+index d7c898a..236772d 100644
+--- a/sm/import.c
++++ b/sm/import.c
+@@ -27,7 +27,26 @@
+ #include <unistd.h>
+ 
+ #include "gpgsm.h"
++
++#ifndef USE_IFM_GCRYPT
+ #include <gcrypt.h>
++#else
++#include "ifm/ifm_gcrypt.h"
++#undef gcry_md_putc
++#define gcry_md_putc(h,c)  \
++            do {                                          \
++                gcry_uadk_md_hd_t h__ = (h);                   \
++                if( (h__)->gcry_hd_t->bufpos == (h__)->gcry_hd_t->bufsize )     \
++                    gcry_md_write( (h__), NULL, 0 );      \
++                (h__)->gcry_hd_t->buf[(h__)->gcry_hd_t->bufpos++] = (c) & 0xff; \
++            } while(0)
++#define gcry_md_handle gcry_uadk_md_hd
++#define gcry_md_hd_t gcry_uadk_md_hd_t
++#define gcry_cipher_handle gcry_uadk_aes_hd
++#define gcry_cipher_hd_t gcry_uadk_aes_hd_t
++#endif
++
++
+ #include <ksba.h>
+ 
+ #include "keydb.h"
+diff --git a/sm/keylist.c b/sm/keylist.c
+index e0b681f..4415558 100644
+--- a/sm/keylist.c
++++ b/sm/keylist.c
+@@ -29,7 +29,26 @@
+ 
+ #include "gpgsm.h"
+ 
++
++#ifndef USE_IFM_GCRYPT
+ #include <gcrypt.h>
++#else
++#include "ifm/ifm_gcrypt.h"
++#undef gcry_md_putc
++#define gcry_md_putc(h,c)  \
++            do {                                          \
++                gcry_uadk_md_hd_t h__ = (h);                   \
++                if( (h__)->gcry_hd_t->bufpos == (h__)->gcry_hd_t->bufsize )     \
++                    gcry_md_write( (h__), NULL, 0 );      \
++                (h__)->gcry_hd_t->buf[(h__)->gcry_hd_t->bufpos++] = (c) & 0xff; \
++            } while(0)
++#define gcry_md_handle gcry_uadk_md_hd
++#define gcry_md_hd_t gcry_uadk_md_hd_t
++#define gcry_cipher_handle gcry_uadk_aes_hd
++#define gcry_cipher_hd_t gcry_uadk_aes_hd_t
++#endif
++
++
+ #include <ksba.h>
+ 
+ #include "keydb.h"
+diff --git a/sm/minip12.c b/sm/minip12.c
+index 9096f0b..089c22b 100644
+--- a/sm/minip12.c
++++ b/sm/minip12.c
+@@ -25,7 +25,26 @@
+ #include <stdlib.h>
+ #include <string.h>
+ #include <assert.h>
++
++#ifndef USE_IFM_GCRYPT
+ #include <gcrypt.h>
++#else
++#include "ifm/ifm_gcrypt.h"
++#undef gcry_md_putc
++#define gcry_md_putc(h,c)  \
++            do {                                          \
++                gcry_uadk_md_hd_t h__ = (h);                   \
++                if( (h__)->gcry_hd_t->bufpos == (h__)->gcry_hd_t->bufsize )     \
++                    gcry_md_write( (h__), NULL, 0 );      \
++                (h__)->gcry_hd_t->buf[(h__)->gcry_hd_t->bufpos++] = (c) & 0xff; \
++            } while(0)
++#define gcry_md_handle gcry_uadk_md_hd
++#define gcry_md_hd_t gcry_uadk_md_hd_t
++#define gcry_cipher_handle gcry_uadk_aes_hd
++#define gcry_cipher_hd_t gcry_uadk_aes_hd_t
++#endif
++
++
+ #include <errno.h>
+ 
+ #ifdef TEST
+diff --git a/sm/minip12.h b/sm/minip12.h
+index 343b733..681043d 100644
+--- a/sm/minip12.h
++++ b/sm/minip12.h
+@@ -20,7 +20,26 @@
+ #ifndef MINIP12_H
+ #define MINIP12_H
+ 
++
++#ifndef USE_IFM_GCRYPT
+ #include <gcrypt.h>
++#else
++#include "ifm/ifm_gcrypt.h"
++#undef gcry_md_putc
++#define gcry_md_putc(h,c)  \
++            do {                                          \
++                gcry_uadk_md_hd_t h__ = (h);                   \
++                if( (h__)->gcry_hd_t->bufpos == (h__)->gcry_hd_t->bufsize )     \
++                    gcry_md_write( (h__), NULL, 0 );      \
++                (h__)->gcry_hd_t->buf[(h__)->gcry_hd_t->bufpos++] = (c) & 0xff; \
++            } while(0)
++#define gcry_md_handle gcry_uadk_md_hd
++#define gcry_md_hd_t gcry_uadk_md_hd_t
++#define gcry_cipher_handle gcry_uadk_aes_hd
++#define gcry_cipher_hd_t gcry_uadk_aes_hd_t
++#endif
++
++
+ 
+ void p12_set_verbosity (int verbose);
+ 
+diff --git a/sm/sign.c b/sm/sign.c
+index dd7612f..2af4c7c 100644
+--- a/sm/sign.c
++++ b/sm/sign.c
+@@ -28,7 +28,26 @@
+ #include <assert.h>
+ 
+ #include "gpgsm.h"
++
++#ifndef USE_IFM_GCRYPT
+ #include <gcrypt.h>
++#else
++#include "ifm/ifm_gcrypt.h"
++#undef gcry_md_putc
++#define gcry_md_putc(h,c)  \
++            do {                                          \
++                gcry_uadk_md_hd_t h__ = (h);                   \
++                if( (h__)->gcry_hd_t->bufpos == (h__)->gcry_hd_t->bufsize )     \
++                    gcry_md_write( (h__), NULL, 0 );      \
++                (h__)->gcry_hd_t->buf[(h__)->gcry_hd_t->bufpos++] = (c) & 0xff; \
++            } while(0)
++#define gcry_md_handle gcry_uadk_md_hd
++#define gcry_md_hd_t gcry_uadk_md_hd_t
++#define gcry_cipher_handle gcry_uadk_aes_hd
++#define gcry_cipher_hd_t gcry_uadk_aes_hd_t
++#endif
++
++
+ #include <ksba.h>
+ 
+ #include "keydb.h"
+diff --git a/sm/verify.c b/sm/verify.c
+index 3c5279e..c767c96 100644
+--- a/sm/verify.c
++++ b/sm/verify.c
+@@ -31,7 +31,26 @@
+ #include <assert.h>
+ 
+ #include "gpgsm.h"
++
++#ifndef USE_IFM_GCRYPT
+ #include <gcrypt.h>
++#else
++#include "ifm/ifm_gcrypt.h"
++#undef gcry_md_putc
++#define gcry_md_putc(h,c)  \
++            do {                                          \
++                gcry_uadk_md_hd_t h__ = (h);                   \
++                if( (h__)->gcry_hd_t->bufpos == (h__)->gcry_hd_t->bufsize )     \
++                    gcry_md_write( (h__), NULL, 0 );      \
++                (h__)->gcry_hd_t->buf[(h__)->gcry_hd_t->bufpos++] = (c) & 0xff; \
++            } while(0)
++#define gcry_md_handle gcry_uadk_md_hd
++#define gcry_md_hd_t gcry_uadk_md_hd_t
++#define gcry_cipher_handle gcry_uadk_aes_hd
++#define gcry_cipher_hd_t gcry_uadk_aes_hd_t
++#endif
++
++
+ #include <ksba.h>
+ 
+ #include "keydb.h"
+diff --git a/tests/gpgscm/main.c b/tests/gpgscm/main.c
+index f2b12aa..410671b 100644
+--- a/tests/gpgscm/main.c
++++ b/tests/gpgscm/main.c
+@@ -25,7 +25,26 @@
+ #include <ctype.h>
+ #include <errno.h>
+ #include <fcntl.h>
++
++#ifndef USE_IFM_GCRYPT
+ #include <gcrypt.h>
++#else
++#include "ifm/ifm_gcrypt.h"
++#undef gcry_md_putc
++#define gcry_md_putc(h,c)  \
++            do {                                          \
++                gcry_uadk_md_hd_t h__ = (h);                   \
++                if( (h__)->gcry_hd_t->bufpos == (h__)->gcry_hd_t->bufsize )     \
++                    gcry_md_write( (h__), NULL, 0 );      \
++                (h__)->gcry_hd_t->buf[(h__)->gcry_hd_t->bufpos++] = (c) & 0xff; \
++            } while(0)
++#define gcry_md_handle gcry_uadk_md_hd
++#define gcry_md_hd_t gcry_uadk_md_hd_t
++#define gcry_cipher_handle gcry_uadk_aes_hd
++#define gcry_cipher_hd_t gcry_uadk_aes_hd_t
++#endif
++
++
+ #include <gpg-error.h>
+ #include <stdio.h>
+ #include <stdlib.h>
+-- 
+2.33.0
+
