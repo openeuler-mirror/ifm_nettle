@@ -1,0 +1,57 @@
+From ea40e5312fad4f2d0389f660653019a487c1b06b Mon Sep 17 00:00:00 2001
+From: SimonShin <1847401037@qq.com>
+Date: Sun, 10 Dec 2023 01:52:53 +0800
+Subject: [PATCH] elfutils support unizip instead of zlib
+
+---
+ elfutils.spec | 11 +++++++++--
+ 1 file changed, 9 insertions(+), 2 deletions(-)
+
+diff --git a/elfutils.spec b/elfutils.spec
+index cb65ce0..3929446 100644
+--- a/elfutils.spec
++++ b/elfutils.spec
+@@ -1,7 +1,7 @@
+ # -*- rpm-spec from http://elfutils.org/ -*-
+ Name: elfutils
+ Version: 0.185
+-Release: 18
++Release: 19
+ Summary: A collection of utilities and DSOs to handle ELF files and DWARF data
+ URL: http://elfutils.org/
+ License: GPLv3+ and (GPLv2+ or LGPLv3+)
+@@ -15,6 +15,7 @@ Patch4: Get-instance-correctly-for-eu-ar-N-option.patch
+ Patch5: backport-readelf-Handle-DW_LLE_GNU_view_pair.patch
+ Patch6: elfutils-Add-sw64-architecture.patch
+ Patch7: backport-libdwfl-Fix-overflow-check-in-link_map.c-read_addrs.patch
++Patch8: support-unizip-instead-of-zlib.patch
+ 
+ Provides:  elfutils-libelf elfutils-default-yama-scope default-yama-scope elfutils-libs
+ Obsoletes: elfutils-libelf < %{version}-%{release} elfutils-default-yama-scope < %{version}-%{release} elfutils-libs < %{version}-%{release}
+@@ -133,9 +134,12 @@ such servers to download those files on demand.
+ %patch6 -p1
+ %endif
+ %patch7 -p1
++%patch8 -p1
++
++autoreconf -fi
+ 
+ %build
+-%configure --program-prefix=%{_programprefix}
++%configure --program-prefix=%{_programprefix} --with-unizip
+ %make_build
+ 
+ %install
+@@ -267,6 +271,9 @@ exit 0
+ %systemd_postun_with_restart debuginfod.service
+ 
+ %changelog
++* Fri Dec 08 2023 tanxin <njutanx@163.com> - 0.185-19
++- DESC:support unizip instead of zlib
++
+ * Fri Sep 01 2023 fuanan <fuanan3@h-partners.com> - 0.185-18
+ - Type:bugfix
+ - ID:NA
+-- 
+2.27.0
+

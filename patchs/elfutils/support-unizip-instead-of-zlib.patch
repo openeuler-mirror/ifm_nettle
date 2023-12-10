@@ -1,0 +1,92 @@
+From 89ad8b0af876ba8271d09b88c09a879ac45dbd26 Mon Sep 17 00:00:00 2001
+From: SimonShin <1847401037@qq.com>
+Date: Sun, 10 Dec 2023 00:48:26 +0800
+Subject: [PATCH] support unizip instead of zlib
+
+---
+ configure.ac          | 16 ++++++++++++++++
+ libdwfl/gzip.c        |  6 +++++-
+ libelf/Makefile.am    |  3 +++
+ libelf/elf_compress.c |  7 +++++++
+ 4 files changed, 31 insertions(+), 1 deletion(-)
+
+diff --git a/configure.ac b/configure.ac
+index b348a71..b9c7fc5 100644
+--- a/configure.ac
++++ b/configure.ac
+@@ -365,6 +365,22 @@ if test "x$with_valgrind_headers" != xno; then
+           [ AC_MSG_ERROR([invalid valgrind include directory: $with_valgrind_headers]) ])
+ fi
+ 
++AC_ARG_WITH([unizip],
++    [AS_HELP_STRING([--with-unizip], [Enable UNIZIP (default is no)])],
++    [use_unizip="$withval"],
++    [use_unizip="no"])
++AM_CONDITIONAL(USE_UNIZIP_CONDI,test "$use_unizip" = yes)
++
++if test "x$use_unizip" = "xyes"; then
++    AC_MSG_WARN([UNIZIP is enabled.])
++    PKG_CHECK_MODULES([UNIZIP], [unizip],
++        [LIBS="-lunizip $LIBS"
++        AC_DEFINE([USE_UNIZIP], [1], [Define if UNIZIP is enabled])],
++        [
++        AC_MSG_ERROR([Could not find UNIZIP library])
++        ])
++fi
++
+ AC_ARG_ENABLE([valgrind-annotations],
+ AS_HELP_STRING([--enable-valgrind-annotations],[insert extra annotations for better valgrind support]),
+ [use_vg_annotations=$enableval], [use_vg_annotations=no])
+diff --git a/libdwfl/gzip.c b/libdwfl/gzip.c
+index ba8ecfb..3b97b0b 100644
+--- a/libdwfl/gzip.c
++++ b/libdwfl/gzip.c
+@@ -69,7 +69,11 @@
+ #else
+ # define USE_INFLATE	0
+ # define crc32		loser_crc32
+-# include <zlib.h>
++#ifndef USE_UNIZIP
++#include <zlib.h>
++#else
++#include "unizip_adapt.h"
++#endif
+ # define unzip		__libdw_gunzip
+ # define MAGIC		"\037\213"
+ # define Z(what)	Z_##what
+diff --git a/libelf/Makefile.am b/libelf/Makefile.am
+index 560ed45..38b27db 100644
+--- a/libelf/Makefile.am
++++ b/libelf/Makefile.am
+@@ -110,6 +110,9 @@ libelf_so_LDLIBS = $(libelf_so_DEPS) -lz
+ if USE_LOCKS
+ libelf_so_LDLIBS += -lpthread
+ endif
++if USE_UNIZIP_CONDI
++libelf_so_LDLIBS += -lunizip
++endif
+ 
+ libelf_so_LIBS = libelf_pic.a
+ libelf.so: $(srcdir)/libelf.map $(libelf_so_LIBS) $(libelf_so_DEPS)
+diff --git a/libelf/elf_compress.c b/libelf/elf_compress.c
+index df0144e..c87712e 100644
+--- a/libelf/elf_compress.c
++++ b/libelf/elf_compress.c
+@@ -39,7 +39,14 @@
+ #include <stdlib.h>
+ #include <string.h>
+ #include <unistd.h>
++#ifndef USE_UNIZIP
+ #include <zlib.h>
++#else
++#include "unizip_adapt.h"
++#define z_stream_s unizip_stream_s
++#define z_stream unizip_stream
++#define z_streamp unizip_streamp
++#endif
+ 
+ /* Cleanup and return result.  Don't leak memory.  */
+ static void *
+-- 
+2.27.0
+
