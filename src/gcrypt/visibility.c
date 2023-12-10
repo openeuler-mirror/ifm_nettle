@@ -136,6 +136,11 @@ gcry_error_t ifm_gcry_pk_ctl(int cmd, void *buffer, size_t buflen)
     return gcry_pk_ctl(cmd, buffer, buflen);
 }
 
+gcry_error_t ifm_gcry_pk_algo_info(int algo, int what, void *buffer, size_t *nbytes)
+{
+    return gcry_pk_algo_info(algo, what, buffer, nbytes);
+}
+
 const char *ifm_gcry_pk_algo_name(int algorithm)
 {
     return gcry_pk_algo_name(algorithm);
