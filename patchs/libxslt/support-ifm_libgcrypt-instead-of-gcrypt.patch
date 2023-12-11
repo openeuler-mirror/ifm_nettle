@@ -49,8 +49,8 @@ index 8845a13..77dfa03 100644
  #include <gcrypt.h>
 +#else
 +#include "ifm/ifm_gcrypt.h"
-+#define gcry_md_handle gcry_uadk_sha2_hd
-+#define gcry_md_hd_t gcry_uadk_sha2_hd_t
++#define gcry_md_handle gcry_uadk_md_hd
++#define gcry_md_hd_t gcry_uadk_md_hd_t
 +#define gcry_cipher_handle gcry_uadk_aes_hd
 +#define gcry_cipher_hd_t gcry_uadk_aes_hd_t
 +#endif
