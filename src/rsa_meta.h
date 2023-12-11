@@ -38,6 +38,8 @@
 extern "C" {
 #endif
 
+#define RSA_MINIMUM_N_OCTETS 12
+
 struct ifm_rsa_public_key {
     /* Size of the modulo, in octets. This is also the size of all
      * signatures that are created or verified with this key. */
