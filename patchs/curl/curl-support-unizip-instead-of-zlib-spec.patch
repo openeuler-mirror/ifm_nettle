@@ -1,14 +1,14 @@
-From 00ffbb40749ca3f4ae96fcda1cc331a59b6c9303 Mon Sep 17 00:00:00 2001
+From 9d1e094990638e4c00b9101f9d56fb16f2e763c8 Mon Sep 17 00:00:00 2001
 From: SimonShin <1847401037@qq.com>
-Date: Fri, 8 Dec 2023 17:55:47 +0800
-Subject: [PATCH] curl support unizip instead of zlib spec
+Date: Tue, 12 Dec 2023 14:33:38 +0800
+Subject: [PATCH] curl support unizip insetad of zlib spec
 
 ---
- curl.spec | 9 +++++++--
- 1 file changed, 7 insertions(+), 2 deletions(-)
+ curl.spec | 12 +++++++++---
+ 1 file changed, 9 insertions(+), 3 deletions(-)
 
 diff --git a/curl.spec b/curl.spec
-index 0ce8985..62f9ce9 100644
+index 0ce8985..d132d13 100644
 --- a/curl.spec
 +++ b/curl.spec
 @@ -6,7 +6,7 @@
@@ -28,8 +28,20 @@ index 0ce8985..62f9ce9 100644
  
  BuildRequires:  automake brotli-devel coreutils gcc groff krb5-devel
  BuildRequires:  libidn2-devel libnghttp2-devel libpsl-devel
-@@ -156,7 +157,8 @@ export common_configure_opts="--cache-file=../config.cache \
-         --with-brotli \
+@@ -120,6 +121,8 @@ Header files for libcurl.
+ %prep
+ %autosetup -n %{name}-%{version} -p1
+ 
++autoreconf -fi
++
+ printf "1112\n1455\n1184\n1801\n1592\n" >> tests/data/DISABLED
+ 
+ # adapt test 323 for updated OpenSSL
+@@ -153,10 +156,10 @@ export common_configure_opts="--cache-file=../config.cache \
+         --enable-ldap \
+         --enable-ldaps \
+         --enable-manual \
+-        --with-brotli \
          --with-libidn2 \
          --with-libpsl \
 -        --with-libssh
@@ -38,7 +50,7 @@ index 0ce8985..62f9ce9 100644
  )
  
  sed -e 's/^runpath_var=.*/runpath_var=/' \
-@@ -246,6 +248,9 @@ rm -rf ${RPM_BUILD_ROOT}%{_libdir}/libcurl.la
+@@ -246,6 +249,9 @@ rm -rf ${RPM_BUILD_ROOT}%{_libdir}/libcurl.la
  %{_mandir}/man3/*
  
  %changelog
