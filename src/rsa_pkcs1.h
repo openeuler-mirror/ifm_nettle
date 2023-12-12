@@ -88,6 +88,8 @@ static const uint8_t sha512_prefix[] = {
 uint8_t *uadk_pkcs1_signature_prefix(unsigned key_size, uint8_t *buffer, unsigned id_size, const uint8_t *id,
                                      unsigned digest_size);
 
+int uadk_pkcs1_rsa_digest_encode(mpz_t m, size_t key_size, size_t di_length, const uint8_t *digest_info);
+
 int uadk_pkcs1_rsa_md5_encode(mpz_t m, size_t key_size, struct ifm_md5_ctx *hash);
 
 int uadk_pkcs1_rsa_md5_encode_digest(mpz_t m, size_t key_size, const uint8_t *digest);

@@ -55,6 +55,25 @@ uint8_t *uadk_pkcs1_signature_prefix(unsigned key_size, uint8_t *buffer, unsigne
     return buffer + j + id_size;
 }
 
+int uadk_pkcs1_rsa_digest_encode(mpz_t m, size_t key_size, size_t di_length, const uint8_t *digest_info)
+{
+    uint8_t *p;
+    uint8_t *em;
+    size_t tmp_em_size;
+    tmp_em_size = key_size;
+    em = malloc(tmp_em_size);
+
+    p = uadk_pkcs1_signature_prefix(key_size, em, di_length, digest_info, 0);
+    if (p) {
+        nettle_mpz_set_str_256_u(m, key_size, em);
+        free(em);
+        return 1;
+    } else {
+        free(em);
+        return 0;
+    }
+}
+
 int uadk_pkcs1_rsa_md5_encode(mpz_t m, size_t key_size, struct ifm_md5_ctx *hash)
 {
     uint8_t *p;
