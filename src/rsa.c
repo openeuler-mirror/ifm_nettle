@@ -245,6 +245,13 @@ int uadk_rsa_verify(struct uadk_rsa_st *uadk_st, const mpz_t m, const mpz_t s)
     uadk_st->opdata->in_bytes = key_size;
     uadk_st->opdata->out_bytes = key_size;
 
+    int move;
+    if (size_s < key_size) {
+        move = key_size - size_s;
+        memmove(data + move, data, size_s);
+        memset(data, 0, move);
+    }
+
     memcpy(uadk_st->opdata->in, data, key_size);
     if (0 != wcrypto_do_rsa(uadk_st->ctx, uadk_st->opdata, NULL)) {
         return 0;

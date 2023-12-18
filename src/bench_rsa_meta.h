@@ -30,6 +30,10 @@
 #include "md5.h"
 #include "rsa.h"
 
+#ifdef __cplusplus
+extern "C" {
+#endif
+
 #define rsa_public_key ifm_rsa_public_key
 #define rsa_private_key ifm_rsa_private_key
 
@@ -109,5 +113,9 @@ const struct nettle_rsa nettle_rsa_sha512 = {
     (nettle_rsa_verify_func *) rsa_sha512_verify,
     (nettle_rsa_sign_digest_func *) rsa_sha512_sign_digest
 };
+
+#ifdef __cplusplus
+}
+#endif
 
 #endif

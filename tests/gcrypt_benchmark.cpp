@@ -1116,7 +1116,7 @@ uadk_cipher_bench(const char *algoname) {
     //256B、512B、1KB、10KB、512KB、1MB
     int times = 1000;
     int test_data_size[6] = {512, 1024, 1024 * 10, 1024 * 512, 1024 * 1024 * 1 , 1024 * 1024 * 10 };
-    printf("%s %d %s", "algo\t|\t512B(en)\t512B(decrypt)\t1KB(en)\t1KB(de)\t10KB(en)\t10KB(de)\t512KB(en)\t512KB(de)\t1MB(en)\t1MB(de)\t10MB(en)\t10MB(de)|\twrite", times, "times");
+    printf("%s %d %s", "algo\t|\t512B(encrypt)\t512B(decrypt)\t1KB(encrypt)\t1KB(decrypt)\t10KB(encrypt)\t10KB(decrypt)\t512KB(encrypt)\t512KB(decrypt)\t1MB(encrypt)\t1MB(decrypt)\t10MB(encrypt)\t10MB(decrypt)|\twrite", times, "times");
     putchar('\n');
     algo = gcry_cipher_map_name(algoname);
     if (!algo) {
@@ -1945,9 +1945,9 @@ uadk_md_bench(const char *algoname) {
         fprintf(stderr, PGM ": error opening hash algorithm `%s'\n", algoname);
         exit(1);
     }
-    printf("%s %d %s", "algo\t|\t512B\t\t1KB\t\t\t10KB\t\t512KB\t\t1MB\t\t\t10MB\t\t20MB|\twrite", times, "times");
+    printf("%s %d %s", "algo\t|\t512B\t\t1KB\t\t10KB\t\t512KB\t\t1MB\t\t10MB\t\t20MB|\twrite", times, "times");
     putchar('\n');
-    printf("%-12s", gcry_md_algo_name(algo));
+    printf("%-12s\t", gcry_md_algo_name(algo));
     for (int temp = 0; temp < sizeof(test_data_size) / sizeof(int); temp++) {
         struct timeval start_tval;
         gettimeofday(&start_tval, NULL);
